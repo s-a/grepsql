@@ -75,7 +75,7 @@ namespace PgQuery.NET.AST
                 Node.NodeOneofCase.TypeCast => Visit(node.TypeCast),
                 Node.NodeOneofCase.FuncCall => Visit(node.FuncCall),
                 Node.NodeOneofCase.JoinExpr => Visit(node.JoinExpr),
-                _ => default
+                _ => default!
             };
         }
 

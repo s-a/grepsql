@@ -489,14 +489,7 @@ namespace PgQuery.NET.Analysis
                     return true;
                 }
 
-                // Handle special cases
-                if (_token == "SelectStmt" && node is RawStmt rawStmt && rawStmt.Stmt is SelectStmt)
-                {
-                    if (_debug) Log($"✓ SelectStmt special case match found", true);
-                    // Add this node to the matching path since it matched
-                    _matchingPath.Add(node);
-                    return true;
-                }
+                // No special case handling needed - the main pattern matching handles this
 
                 if (_debug) Log($"× No match found for token: {_token}", true);
                 return false;
@@ -2008,10 +2001,10 @@ namespace PgQuery.NET.Analysis
                     Console.WriteLine($"Tokens: [{string.Join(", ", tokens.Select(t => $"\"{t}\""))}]");
                 }
 
-                return ParseExpression(tokens, 0, out _);
+                return ParseExpression(tokens, 0, out _) ?? new Find("_");
             }
 
-            private static IExpression ParseExpression(List<string> tokens, int startIndex, out int nextIndex)
+            private static IExpression? ParseExpression(List<string> tokens, int startIndex, out int nextIndex)
             {
                 if (startIndex >= tokens.Count)
                 {
@@ -2065,15 +2058,15 @@ namespace PgQuery.NET.Analysis
 
                     case "^":
                         var parentExpr = ParseExpression(tokens, nextIndex, out nextIndex);
-                        return new Parent(parentExpr);
+                        return parentExpr != null ? new Parent(parentExpr) : new Find("_");
 
                     case "?":
                         var maybeExpr = ParseExpression(tokens, nextIndex, out nextIndex);
-                        return new Maybe(maybeExpr);
+                        return maybeExpr != null ? new Maybe(maybeExpr) : new Find("_");
 
                     case "!":
                         var notExpr = ParseExpression(tokens, nextIndex, out nextIndex);
-                        return new Not(notExpr);
+                        return notExpr != null ? new Not(notExpr) : new Find("_");
 
                     default:
                         if (token.StartsWith("$"))

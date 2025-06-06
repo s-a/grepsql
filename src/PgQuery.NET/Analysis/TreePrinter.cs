@@ -240,7 +240,7 @@ namespace PgQuery.NET.Analysis
                         }
                         else
                         {
-                            FormatPrimitiveValue(list[i], sb, useColors);
+                            FormatPrimitiveValue(list[i]!, sb, useColors);
                         }
                     }
                 }
