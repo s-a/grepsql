@@ -34,6 +34,15 @@ bld/
 **/runtimes/**/native/*.so
 **/runtimes/**/native/*.dylib
 
+# Native libraries and build artifacts
+*.dylib
+*.dll
+*.so
+wrapper.c
+test
+test.c
+artifacts/
+
 # libpg_query source (downloaded during build)
 libpg_query/
 
