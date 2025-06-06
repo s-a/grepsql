@@ -555,6 +555,18 @@ namespace PgQuery.NET.Analysis
                     return SearchForPatternsInSubtree(node, remainingPatterns);
                 }
 
+                // NEW: Detect field patterns that should search recursively
+                // Check if this All pattern starts with a field name
+                if (_expressions.Length >= 1 && _expressions[0] is Find firstFind)
+                {
+                    if (_debug) Log($"Checking if pattern starting with '{firstFind.Token}' should be treated as field pattern", true);
+                    if (IsFieldName(firstFind.Token))
+                    {
+                        if (_debug) Log("Detected field pattern, searching globally through tree", true);
+                        return SearchForPatternsInSubtree(node, _expressions);
+                    }
+                }
+
                 // Special case: if we have multiple expressions and the first matches the current node type
                 // then the remaining expressions might be trying to match field structure
                 if (_expressions.Length >= 2 && 
@@ -781,6 +793,76 @@ namespace PgQuery.NET.Analysis
                 }
 
                 if (_debug) Log("× Patterns not found in current node", true);
+                return false;
+            }
+
+            private bool IsFieldPattern(IExpression expression)
+            {
+                if (_debug) Log($"IsFieldPattern: Checking expression of type {expression.GetType().Name}", true);
+                
+                // Check if this is an All pattern that starts with a field name
+                if (expression is All all && all.GetExpressions().Length >= 1 && 
+                    all.GetExpressions()[0] is Find find)
+                {
+                    var token = find.Token;
+                    if (_debug) Log($"IsFieldPattern: Found All pattern with token '{token}'", true);
+                    
+                    return IsFieldName(token);
+                }
+                else
+                {
+                    if (_debug) Log("IsFieldPattern: Expression is not an All pattern or doesn't start with Find", true);
+                }
+                
+                return false;
+            }
+
+            private bool IsFieldName(string token)
+            {
+                // Check if this looks like a field name rather than a node type
+                // Field names are typically camelCase or snake_case and don't match common node types
+                var commonNodeTypes = new HashSet<string>
+                {
+                    "SelectStmt", "InsertStmt", "UpdateStmt", "DeleteStmt", "CreateStmt",
+                    "AlterStmt", "DropStmt", "A_Expr", "ColumnRef", "A_Const", "FuncCall",
+                    "JoinExpr", "BoolExpr", "CaseExpr", "ResTarget", "RangeVar", "SubLink",
+                    "WindowFunc", "Aggref", "GroupingFunc", "WindowDef", "SortBy", "Node",
+                    "List", "String", "Integer", "Float", "BitString", "Null", "Boolean"
+                };
+                
+                // Known field names from PostgreSQL AST
+                var knownFieldNames = new HashSet<string>
+                {
+                    "relname", "schemaname", "whereClause", "targetList", "fromClause", 
+                    "groupClause", "havingClause", "sortClause", "limitOffset", "limitCount",
+                    "distinctClause", "intoClause", "windowClause", "withClause", "valuesLists",
+                    "lockingClause", "op", "all", "larg", "rarg", "relation", "cols", "selectStmt",
+                    "returningList", "onConflictClause", "override", "values", "location",
+                    "fields", "sval", "ival", "fval", "boolval", "val", "name", "args", "funcname",
+                    "agg_order", "agg_distinct", "agg_within_group", "agg_star", "agg_filter",
+                    "over", "lexpr", "rexpr", "kind", "quals", "alias", "colnames", "jointype",
+                    "isNatural", "lqualname", "rqualname", "using", "boolop", "booltesttype",
+                    "nulltesttype", "rowcompare", "opname", "opfamilies", "opcintype", "location"
+                };
+                
+                // If it's a known field name, definitely treat it as a field pattern
+                if (knownFieldNames.Contains(token))
+                {
+                    if (_debug) Log($"'{token}' identified as known field name", true);
+                    return true;
+                }
+                
+                // If it's not a common node type and looks like a field name, treat it as a field pattern
+                if (!commonNodeTypes.Contains(token) && 
+                    (token.Contains("_") || // snake_case
+                     (char.IsLower(token[0]) && token.Any(char.IsUpper)) || // camelCase
+                     token.All(char.IsLower))) // lowercase
+                {
+                    if (_debug) Log($"'{token}' identified as field pattern by naming convention", true);
+                    return true;
+                }
+                
+                if (_debug) Log($"'{token}' NOT identified as field pattern (is common node type: {commonNodeTypes.Contains(token)})", true);
                 return false;
             }
 

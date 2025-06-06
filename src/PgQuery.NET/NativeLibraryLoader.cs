@@ -61,9 +61,6 @@ namespace PgQuery.NET
                         throw new DllNotFoundException($"Failed to load library from {libraryPath}. Error: {error}");
                     }
 
-#if DEBUG
-                    Console.WriteLine($"Successfully loaded library from: {libraryPath}");
-#endif
                     _loaded = true;
                 }
                 catch (Exception ex)

@@ -128,42 +128,27 @@ namespace PgQuery.NET
         private const int MinProtobufSize = 8; // Minimum size for a valid protobuf message
 
         /// <summary>
-        /// Parse a PostgreSQL query into an AST
+        /// Parse a PostgreSQL query into an AST (Abstract Syntax Tree)
         /// </summary>
         /// <param name="query">The SQL query to parse</param>
-        /// <returns>ParseResult containing the AST</returns>
+        /// <returns>ParseResult containing the AST and metadata</returns>
         /// <exception cref="PgQueryException">Thrown when parsing fails</exception>
         public static ParseResult Parse(string query)
         {
             if (string.IsNullOrEmpty(query))
                 throw new ArgumentException("Query cannot be null or empty", nameof(query));
             
-#if DEBUG
-            Console.WriteLine($"Attempting to parse query: {query}");
-#endif
+            // Ensure the native library is loaded
+            NativeLibraryLoader.EnsureLoaded();
+            
             var result = Native.pg_query_parse_protobuf_wrapper(query);
             try
             {
-#if DEBUG
-                Console.WriteLine($"Got result from native library");
-                Console.WriteLine($"Result error pointer: {result.error}");
-                Console.WriteLine($"Result stderr buffer pointer: {result.stderr_buffer}");
-                Console.WriteLine($"Result parse tree data pointer: {result.parse_tree.data}");
-                Console.WriteLine($"Result parse tree length: {result.parse_tree.len}");
-#endif
-                
                 CheckForError(result.error);
                 
                 var stderrBuffer = result.stderr_buffer != IntPtr.Zero 
                     ? Marshal.PtrToStringUTF8(result.stderr_buffer) 
                     : null;
-                
-                if (stderrBuffer != null)
-                {
-#if DEBUG
-                    Console.WriteLine($"Stderr buffer: {stderrBuffer}");
-#endif
-                }
                 
                 // Check if the data pointer is valid
                 if (result.parse_tree.data == IntPtr.Zero)
@@ -173,9 +158,6 @@ namespace PgQuery.NET
 
                 // Safely handle the size - nuint to long conversion to avoid overflow
                 var dataSizeLong = (long)result.parse_tree.len;
-#if DEBUG
-                Console.WriteLine($"Raw protobuf size (long): {dataSizeLong}");
-#endif
                 
                 // Validate size bounds
                 if (dataSizeLong <= 0)
@@ -195,9 +177,6 @@ namespace PgQuery.NET
                 
                 // Safe cast to int after validation
                 var dataSize = (int)dataSizeLong;
-#if DEBUG
-                Console.WriteLine($"Attempting to copy {dataSize} bytes of protobuf data");
-#endif
                 
                 // Copy protobuf data to managed memory
                 var data = new byte[dataSize];
@@ -205,15 +184,9 @@ namespace PgQuery.NET
                 {
                     // Use Marshal.Copy for safe memory copying
                     Marshal.Copy(result.parse_tree.data, data, 0, dataSize);
-#if DEBUG
-                    Console.WriteLine("Successfully copied protobuf data");
-#endif
                 }
                 catch (Exception ex)
                 {
-#if DEBUG
-                    Console.WriteLine($"Failed to copy protobuf data: {ex}");
-#endif
                     throw new PgQueryException($"Failed to copy protobuf data: {ex.Message}");
                 }
                 
@@ -226,16 +199,10 @@ namespace PgQuery.NET
                     {
                         throw new PgQueryException("Failed to parse protobuf data: result is null");
                     }
-#if DEBUG
-                    Console.WriteLine("Successfully parsed protobuf data");
-#endif
                     return new ParseResult(query, parseTree, stderrBuffer);
                 }
                 catch (Exception ex)
                 {
-#if DEBUG
-                    Console.WriteLine($"Failed to parse protobuf data: {ex}");
-#endif
                     throw new PgQueryException($"Failed to parse protobuf data: {ex.Message}");
                 }
             }

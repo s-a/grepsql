@@ -150,6 +150,14 @@ namespace GrepSQL
                     // Use MatchWithDetails for better debugging information
                     var (success, details) = SqlPatternMatcher.MatchWithDetails(pattern, sql, debug, verbose);
                     
+                    // Show debug details even for failed matches when debug is enabled
+                    if (debug && !success)
+                    {
+                        Console.Error.WriteLine($"[DEBUG] Pattern match failed for {fileName} at line {sqlStatements[i].LineNumber}:");
+                        Console.Error.WriteLine(details);
+                        Console.Error.WriteLine();
+                    }
+                    
                     if (success)
                     {
                         var ast = SqlPatternMatcher.ParseSql(sql);
