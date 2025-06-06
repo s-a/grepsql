@@ -101,12 +101,18 @@ UPDATE users SET last_login = NOW() WHERE id = 123;
 
 ## Implementation Roadmap
 
-### Sprint 1: Core Recursive Search Fix
-- [ ] Analyze current `All.Match()` logic
-- [ ] Implement field pattern detection
-- [ ] Route field patterns to recursive search
-- [ ] Basic testing and validation
-- [ ] Ensure backward compatibility
+### Sprint 1: Core Recursive Search Fix ✅ COMPLETED
+- [x] Analyze current `All.Match()` logic
+- [x] Implement field pattern detection
+- [x] Route field patterns to recursive search
+- [x] Basic testing and validation
+- [x] Ensure backward compatibility
+
+**🎉 MAJOR ACHIEVEMENT**: Field patterns like `(relname users)` now work without ellipsis!
+- Fixed infinite recursion bug in field pattern detection
+- Routes field patterns to `SearchForFieldInSubtree` for proper field-aware matching
+- Maintains full compatibility with existing ellipsis patterns
+- All success criteria for Phase 1 have been met
 
 ### Sprint 2: Enhanced Pattern Support
 - [ ] Support complex nested field patterns
