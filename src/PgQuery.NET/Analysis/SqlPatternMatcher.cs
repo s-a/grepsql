@@ -20,6 +20,7 @@ namespace PgQuery.NET.Analysis
         private static bool _verbose = false;
         private static int _depth = 0;
         private static readonly HashSet<IMessage> _matchingPath = new();
+        private static bool _inSubtreeSearch = false;
 
         // Pattern matching literals
         private static readonly Dictionary<string, Func<IMessage, bool>> Literals = new()
@@ -556,14 +557,20 @@ namespace PgQuery.NET.Analysis
                 }
 
                 // NEW: Detect field patterns that should search recursively
-                // Check if this All pattern starts with a field name
-                if (_expressions.Length >= 1 && _expressions[0] is Find firstFind)
+                // Only apply field pattern detection if we're not already in a subtree search
+                if (!_inSubtreeSearch && _expressions.Length >= 1 && _expressions[0] is Find firstFind)
                 {
                     if (_debug) Log($"Checking if pattern starting with '{firstFind.Token}' should be treated as field pattern", true);
                     if (IsFieldName(firstFind.Token))
                     {
                         if (_debug) Log("Detected field pattern, searching globally through tree", true);
-                        return SearchForPatternsInSubtree(node, _expressions);
+                        
+                        var fieldName = firstFind.Token;
+                        var snakeCaseFieldName = ConvertToSnakeCase(fieldName);
+                        var fieldPattern = new All(_expressions);
+                        
+                        // Use the same field-aware search logic as the ellipsis version
+                        return SearchForFieldInSubtree(node, fieldName, snakeCaseFieldName, fieldPattern);
                     }
                 }
 
@@ -870,11 +877,17 @@ namespace PgQuery.NET.Analysis
             {
                 if (_debug) Log($"SearchForPatternsInSubtree: Looking for {patterns.Length} patterns in subtree", true);
                 
-                if (patterns.Length == 0)
+                // Set the flag to prevent infinite recursion from field pattern detection
+                var wasInSubtreeSearch = _inSubtreeSearch;
+                _inSubtreeSearch = true;
+                
+                try
                 {
-                    if (_debug) Log("✓ No patterns to search for", true);
-                    return true;
-                }
+                    if (patterns.Length == 0)
+                    {
+                        if (_debug) Log("✓ No patterns to search for", true);
+                        return true;
+                    }
 
                 // Check if the first pattern is a field pattern (like (whereClause ...)) vs a node type pattern (like (CommonTableExpr ...))
                 if (patterns[0] is All firstPattern && firstPattern.GetExpressions().Length >= 1 &&
@@ -966,8 +979,14 @@ namespace PgQuery.NET.Analysis
                     }
                 }
 
-                if (_debug) Log("× Patterns not found in subtree", true);
-                return false;
+                    if (_debug) Log("× Patterns not found in subtree", true);
+                    return false;
+                }
+                finally
+                {
+                    // Restore the original flag state
+                    _inSubtreeSearch = wasInSubtreeSearch;
+                }
             }
 
             private bool SearchForFieldInSubtree(IMessage node, string fieldName, string snakeCaseFieldName, All fieldPattern)
