@@ -48,6 +48,15 @@ namespace GrepSQL
 
         [Option("no-filename", HelpText = "Don't show filename in output")]
         public bool NoFilename { get; set; }
+
+        [Option("highlight", HelpText = "Highlight matching SQL parts")]
+        public bool HighlightMatches { get; set; }
+
+        [Option("highlight-style", HelpText = "Highlighting style: ansi, html, markdown")]
+        public string? HighlightStyle { get; set; }
+
+        [Option("context", HelpText = "Show context lines around matches (requires --highlight)")]
+        public int? ContextLines { get; set; }
     }
 
     public class SqlMatch
@@ -58,6 +67,7 @@ namespace GrepSQL
         public int LineNumber { get; set; }
         public string MatchDetails { get; set; } = "";
         public HashSet<IMessage>? MatchingPath { get; set; }
+        public List<IMessage>? MatchingNodes { get; set; }
     }
 
     class Program
@@ -164,6 +174,7 @@ namespace GrepSQL
                     {
                         var ast = SqlPatternMatcher.ParseSql(sql);
                         var matchingPath = new HashSet<IMessage>(searchResults); // Use actual search results
+                        var matchingNodes = new List<IMessage>(searchResults); // Keep list for highlighting
                         
                         string details = debug ? $"Found {searchResults.Count} matches" : "";
                         
@@ -174,7 +185,8 @@ namespace GrepSQL
                             Ast = ast?.ParseTree?.Stmts?.FirstOrDefault()?.Stmt,
                             LineNumber = sqlStatements[i].LineNumber,
                             MatchDetails = details,
-                            MatchingPath = matchingPath
+                            MatchingPath = matchingPath,
+                            MatchingNodes = matchingNodes
                         });
                     }
                 }
@@ -295,13 +307,65 @@ namespace GrepSQL
             }
             else
             {
-                Console.WriteLine($"{prefix}{match.Sql}");
+                // Handle highlighting if requested
+                var outputSql = match.Sql;
+                
+                if (options.HighlightMatches && match.MatchingNodes?.Any() == true)
+                {
+                    var highlightOptions = CreateHighlightOptions(options);
+                    
+                    if (options.ContextLines.HasValue)
+                    {
+                        outputSql = SqlHighlighter.ShowMatchesInContext(
+                            match.Sql, 
+                            match.MatchingNodes, 
+                            options.ContextLines.Value, 
+                            highlightOptions);
+                        
+                        // For context view, don't add prefix to each line since it's already formatted
+                        Console.WriteLine($"{prefix}[CONTEXT]");
+                        Console.WriteLine(outputSql);
+                    }
+                    else if (options.Debug || options.Verbose)
+                    {
+                        outputSql = SqlHighlighter.ShowMatchDetails(match.Sql, match.MatchingNodes, highlightOptions);
+                        Console.WriteLine($"{prefix}{outputSql}");
+                    }
+                    else
+                    {
+                        outputSql = SqlHighlighter.HighlightMatches(match.Sql, match.MatchingNodes, highlightOptions);
+                        Console.WriteLine($"{prefix}{outputSql}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"{prefix}{outputSql}");
+                }
             }
             
             if (!options.CountOnly)
             {
                 Console.WriteLine(); // Empty line between matches
             }
+        }
+
+        static HighlightOptions CreateHighlightOptions(Options options)
+        {
+            var highlightStyle = options.HighlightStyle?.ToLowerInvariant() switch
+            {
+                "html" => HighlightStyle.Html,
+                "markdown" => HighlightStyle.Markdown,
+                "ansi" => HighlightStyle.AnsiColors,
+                null => HighlightStyle.AnsiColors,
+                _ => HighlightStyle.AnsiColors
+            };
+
+            return new HighlightOptions
+            {
+                Style = highlightStyle,
+                ShowLineNumbers = options.ShowLineNumbers,
+                ShowMatchInfo = options.Debug || options.Verbose
+            };
         }
     }
 }
