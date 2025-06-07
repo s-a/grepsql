@@ -291,14 +291,6 @@ namespace PgQuery.NET.Analysis
             {
                 return literal;
             }
-
-            // Performance: Fast path for simple patterns
-            if (IsSimplePattern(pattern))
-            {
-                return new Find(pattern);
-            }
-
-            // Full parsing for complex patterns
             return new ExpressionParser(pattern).Parse();
         }
 
@@ -504,12 +496,18 @@ namespace PgQuery.NET.Analysis
             private readonly object _target;
             private readonly string _targetString;
             private readonly bool _isWildcard;
+            private readonly bool _isAttributePattern;
+            private readonly string _attributeName;
+            private readonly object _attributeValue;
 
             public Find(object target)
             {
                 _target = target;
                 _targetString = target?.ToString() ?? "";
                 _isWildcard = _targetString == "_";
+                
+                // Check if this is an s-expression attribute pattern: (relname "users")
+                _isAttributePattern = ParseAttributePattern(_targetString, out _attributeName, out _attributeValue);
             }
             
             public bool IsEllipsis() => _targetString == "...";
@@ -520,6 +518,12 @@ namespace PgQuery.NET.Analysis
                 
                 // Performance: Fast path for wildcards
                 if (_isWildcard) return true;
+
+                // Handle s-expression attribute patterns: (relname "users")
+                if (_isAttributePattern)
+                {
+                    return MatchesAttribute(node, _attributeName, _attributeValue);
+                }
 
                 // Handle common patterns efficiently
                 if (_targetString == "...")
@@ -667,6 +671,73 @@ namespace PgQuery.NET.Analysis
                     }
                 }
                 return false;
+            }
+
+            // Parse s-expression attribute pattern: (relname "users")
+            private bool ParseAttributePattern(string pattern, out string attributeName, out object attributeValue)
+            {
+                attributeName = "";
+                attributeValue = "";
+
+                if (string.IsNullOrEmpty(pattern) || !pattern.StartsWith("(") || !pattern.EndsWith(")"))
+                    return false;
+
+                // Remove parentheses
+                var inner = pattern.Substring(1, pattern.Length - 2).Trim();
+                
+                // Split on whitespace - simple approach
+                var parts = inner.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                
+                if (parts.Length != 2)
+                    return false;
+
+                attributeName = parts[0];
+                var valueStr = parts[1];
+
+                // Parse the value (remove quotes if present)
+                if (valueStr.StartsWith("\"") && valueStr.EndsWith("\"") && valueStr.Length > 1)
+                {
+                    attributeValue = valueStr.Substring(1, valueStr.Length - 2);
+                }
+                else if (valueStr.StartsWith("'") && valueStr.EndsWith("'") && valueStr.Length > 1)
+                {
+                    attributeValue = valueStr.Substring(1, valueStr.Length - 2);
+                }
+                else if (int.TryParse(valueStr, out var intValue))
+                {
+                    attributeValue = intValue;
+                }
+                else if (double.TryParse(valueStr, out var doubleValue))
+                {
+                    attributeValue = doubleValue;
+                }
+                else if (bool.TryParse(valueStr, out var boolValue))
+                {
+                    attributeValue = boolValue;
+                }
+                else
+                {
+                    attributeValue = valueStr; // Keep as string
+                }
+
+
+                return true;
+            }
+
+            // Match node by specific attribute value
+            private bool MatchesAttribute(IMessage node, string attributeName, object expectedValue)
+            {
+                if (node?.Descriptor == null) return false;
+
+                var field = node.Descriptor.Fields.InDeclarationOrder()
+                    .FirstOrDefault(f => f.Name.Equals(attributeName, StringComparison.OrdinalIgnoreCase));
+                
+                if (field == null) return false;
+
+                var actualValue = field.Accessor.GetValue(node);
+                if (actualValue == null) return false;
+
+                return MatchesValue(actualValue, expectedValue);
             }
         }
 
