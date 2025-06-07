@@ -291,6 +291,20 @@ namespace PgQuery.NET.Analysis
             {
                 return literal;
             }
+
+            // Check for s-expression attribute pattern BEFORE complex parsing
+            // because ExpressionParser doesn't handle s-expressions
+            if (pattern.StartsWith("(") && pattern.EndsWith(")"))
+            {
+                return new Find(pattern);
+            }
+
+            // Performance: Fast path for simple patterns
+            if (IsSimplePattern(pattern))
+            {
+                return new Find(pattern);
+            }
+            
             return new ExpressionParser(pattern).Parse();
         }
 
