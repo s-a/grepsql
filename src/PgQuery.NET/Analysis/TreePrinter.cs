@@ -188,7 +188,10 @@ namespace PgQuery.NET.Analysis
                             sb.Append($"{fieldIndent}{fieldName}: ");
                         }
                         sb.AppendLine();
-                        FormatNode(childMessage, sb, depth + 1, maxDepth, useColors, NodeStatus.Normal, visited, mode, matchingPath);
+                        if (childMessage != null)
+                        {
+                            FormatNode(childMessage, sb, depth + 1, maxDepth, useColors, NodeStatus.Normal, visited, mode, matchingPath);
+                        }
                     }
                 }
                 else

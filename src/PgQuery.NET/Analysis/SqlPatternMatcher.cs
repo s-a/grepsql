@@ -380,7 +380,7 @@ namespace PgQuery.NET.Analysis
         /// </summary>
         public static void ClearCaptures()
         {
-            _captures.Value.Clear();
+            _captures.Value?.Clear();
         }
 
         /// <summary>
@@ -388,7 +388,7 @@ namespace PgQuery.NET.Analysis
         /// </summary>
         internal static void AddCapture(IMessage node)
         {
-            _captures.Value.Add(node);
+            _captures.Value?.Add(node);
         }
 
         /// <summary>
@@ -426,8 +426,8 @@ namespace PgQuery.NET.Analysis
             
             // Handle camelCase to underscore conversion for node types
             // e.g., SelectStmt vs select_stmt, A_Const vs a_const
-            if (ConvertCamelToUnderscore(value) == target.ToLowerInvariant() ||
-                ConvertCamelToUnderscore(target) == value.ToLowerInvariant())
+            if (ConvertCamelToUnderscore(value) == target?.ToLowerInvariant() ||
+                ConvertCamelToUnderscore(target) == value?.ToLowerInvariant())
             {
                 return true;
             }
@@ -443,9 +443,9 @@ namespace PgQuery.NET.Analysis
         }
         
         // Convert camelCase/PascalCase to underscore_case
-        private static string ConvertCamelToUnderscore(string input)
+        private static string ConvertCamelToUnderscore(string? input)
         {
-            if (string.IsNullOrEmpty(input)) return input;
+            if (string.IsNullOrEmpty(input)) return input ?? "";
             
             var result = new System.Text.StringBuilder();
             
@@ -466,9 +466,9 @@ namespace PgQuery.NET.Analysis
         }
         
         // Convert underscore_case to camelCase
-        private static string ConvertUnderscoreToCamel(string input)
+        private static string ConvertUnderscoreToCamel(string? input)
         {
-            if (string.IsNullOrEmpty(input)) return input;
+            if (string.IsNullOrEmpty(input)) return input ?? "";
             
             var result = new System.Text.StringBuilder();
             bool capitalizeNext = false;
