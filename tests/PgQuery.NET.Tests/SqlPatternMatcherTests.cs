@@ -627,5 +627,36 @@ namespace PgQuery.NET.Tests
             var simpleMatch = SqlPatternMatcher.Matches("...", "SELECT 1");
             Assert.True(simpleMatch, "Should match simple SQL structure");
         }
+
+        [Fact]
+        public void TestPatternCombinationScenarios()
+        {
+            var sql = "SELECT COUNT(*) as total, AVG(age) as avg_age FROM users WHERE active = true AND age BETWEEN 18 AND 65";
+
+            _output.WriteLine("Testing pattern combination scenarios:");
+
+            // Test multiple function calls
+            var funcMatches = SqlPatternMatcher.Search("FuncCall", sql);
+            _output.WriteLine($"Found {funcMatches.Count} function calls");
+            Assert.True(funcMatches.Count >= 2, "Should find multiple function calls (COUNT, AVG)");
+
+            // Test multiple constants
+            var constMatches = SqlPatternMatcher.Search("A_Const", sql);
+            _output.WriteLine($"Found {constMatches.Count} constants");
+            Assert.True(constMatches.Count >= 3, "Should find multiple constants (true, 18, 65)");
+
+            // Test boolean expressions with AND
+            var boolMatches = SqlPatternMatcher.Search("BoolExpr", sql);
+            _output.WriteLine($"Found {boolMatches.Count} boolean expressions");
+            Assert.True(boolMatches.Count > 0, "Should find AND expressions");
+
+            // Test that different pattern types can find different aspects of same SQL
+            var selectMatches = SqlPatternMatcher.Search("SelectStmt", sql);
+            var exprMatches = SqlPatternMatcher.Search("A_Expr", sql);
+            
+            _output.WriteLine($"SelectStmt: {selectMatches.Count}, A_Expr: {exprMatches.Count}, A_Const: {constMatches.Count}");
+            Assert.True(selectMatches.Count > 0 && exprMatches.Count > 0 && constMatches.Count > 0, 
+                       "Different pattern types should find different aspects of the same SQL");
+        }
     }
 } 
