@@ -185,7 +185,8 @@ jobs:
           fi
 
       - name: Run tests
-        run: dotnet test --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"
+        timeout-minutes: 10
+        run: dotnet test --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --logger trx --results-directory TestResults
 
       - name: Upload coverage reports
         if: matrix.os == 'ubuntu-latest'
