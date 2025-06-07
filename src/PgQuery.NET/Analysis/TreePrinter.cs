@@ -169,11 +169,27 @@ namespace PgQuery.NET.Analysis
 
                 var fieldIndent = new string(' ', (depth + 1) * 2);
                 
-                // Skip showing field name for single IMessage values to avoid redundancy
-                if (value is IMessage)
+                // For single IMessage values, check if we should show them inline
+                if (value is IMessage childMessage)
                 {
-                    // Don't show the field name, just format the message directly with proper indentation
-                    FormatNode((IMessage)value, sb, depth + 1, maxDepth, useColors, NodeStatus.Normal, visited, mode, matchingPath);
+                    // For simple wrapper types like Node, show the content directly
+                    if (nodeType == "Node" && childMessage != null)
+                    {
+                        FormatNode(childMessage, sb, depth, maxDepth, useColors, NodeStatus.Normal, visited, mode, matchingPath);
+                    }
+                    else
+                    {
+                        if (useColors)
+                        {
+                            sb.Append($"{fieldIndent}{Colors.Yellow}{fieldName}{Colors.Reset}: ");
+                        }
+                        else
+                        {
+                            sb.Append($"{fieldIndent}{fieldName}: ");
+                        }
+                        sb.AppendLine();
+                        FormatNode(childMessage, sb, depth + 1, maxDepth, useColors, NodeStatus.Normal, visited, mode, matchingPath);
+                    }
                 }
                 else
                 {
@@ -292,21 +308,27 @@ namespace PgQuery.NET.Analysis
             if (fieldName == "location")
                 return true;
 
+            // Skip nodeCase fields as they're redundant
+            if (fieldName == "nodeCase")
+                return true;
+
             // Skip default enum values
             if (value is string stringValue)
             {
                 if (stringValue == "Default" || stringValue == "SetopNone" || 
                     stringValue == "LIMIT_OPTION_DEFAULT" || stringValue == "SETOP_NONE" ||
                     stringValue == "CoerceExplicitCall" || stringValue == "COERCE_EXPLICIT_CALL" ||
-                    stringValue == "AexprOp" || stringValue == "AEXPR_OP")
+                    stringValue == "AexprOp" || stringValue == "AEXPR_OP" ||
+                    stringValue == "LimitOptionDefault")
                     return true;
             }
 
-            // Skip enum values that are default/none
+            // Skip enum values that are default/none/empty
             if (value != null)
             {
                 var valueStr = value.ToString();
-                if (valueStr == "Default" || valueStr == "SetopNone" || valueStr == "LimitOptionDefault")
+                if (valueStr == "Default" || valueStr == "SetopNone" || valueStr == "LimitOptionDefault" ||
+                    valueStr == "0" && (fieldName == "kind" || fieldName == "op"))
                     return true;
             }
 
@@ -328,7 +350,8 @@ namespace PgQuery.NET.Analysis
             // Skip empty string values for certain fields
             if (value is string emptyStr && string.IsNullOrEmpty(emptyStr))
             {
-                if (fieldName == "catalogname" || fieldName == "schemaname" || fieldName == "name")
+                if (fieldName == "catalogname" || fieldName == "schemaname" || fieldName == "name" ||
+                    fieldName == "alias" || fieldName == "aliasname")
                     return true;
             }
 
@@ -338,6 +361,19 @@ namespace PgQuery.NET.Analysis
                 if (fieldName == "relpersistence" && singleChar == "p") // Default persistence
                     return true;
             }
+
+            // Skip default integer values for specific fields
+            if (value is int intValue)
+            {
+                if ((fieldName == "kind" || fieldName == "op" || fieldName == "limitOption") && intValue == 1)
+                    return true;
+                if (fieldName == "valCase" && intValue > 0) // valCase is redundant when we show the actual value
+                    return true;
+            }
+
+            // Skip indirection arrays that are empty (common in ResTarget)
+            if (fieldName == "indirection" && value is IList list && list.Count == 0)
+                return true;
 
             return false;
         }

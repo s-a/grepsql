@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CommandLine;
 using Google.Protobuf;
 using PgQuery.NET;
@@ -147,21 +148,24 @@ namespace GrepSQL
 
                 try
                 {
-                    // Use MatchWithDetails for better debugging information
-                    var (success, details) = SqlPatternMatcher.MatchWithDetails(pattern, sql, debug, verbose);
+                    // Use Search for recursive pattern matching instead of MatchWithDetails
+                    var searchResults = SqlPatternMatcher.Search(pattern, sql, debug);
+                    bool success = searchResults.Count > 0;
                     
                     // Show debug details even for failed matches when debug is enabled
                     if (debug && !success)
                     {
                         Console.Error.WriteLine($"[DEBUG] Pattern match failed for {fileName} at line {sqlStatements[i].LineNumber}:");
-                        Console.Error.WriteLine(details);
+                        Console.Error.WriteLine("Pattern did not match");
                         Console.Error.WriteLine();
                     }
                     
                     if (success)
                     {
                         var ast = SqlPatternMatcher.ParseSql(sql);
-                        var matchingPath = SqlPatternMatcher.GetMatchingPath();
+                        var matchingPath = new HashSet<IMessage>(searchResults); // Use actual search results
+                        
+                        string details = debug ? $"Found {searchResults.Count} matches" : "";
                         
                         matches.Add(new SqlMatch
                         {
@@ -169,7 +173,7 @@ namespace GrepSQL
                             Sql = sql,
                             Ast = ast?.ParseTree?.Stmts?.FirstOrDefault()?.Stmt,
                             LineNumber = sqlStatements[i].LineNumber,
-                            MatchDetails = debug ? details : "",
+                            MatchDetails = details,
                             MatchingPath = matchingPath
                         });
                     }
@@ -282,7 +286,8 @@ namespace GrepSQL
                 var jsonOptions = new JsonSerializerOptions 
                 { 
                     WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 };
                 
                 Console.WriteLine($"{prefix}[AST]");
