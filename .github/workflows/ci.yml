@@ -24,17 +24,45 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          submodules: recursive
 
-      - name: Setup .NET
+      - name: Setup .NET Core
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: |
-            8.0.x
-            9.0.x
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Cache libpg_query build
+        if: matrix.os != 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: |
+            libpg_query/libpg_query.a
+            libpg_query/pg_query.h
+            libpg_query/.libs/
+            libpg_query/src/
+          key: ${{ runner.os }}-libpg_query-${{ hashFiles('libpg_query/**/*.c', 'libpg_query/**/*.h', 'libpg_query/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-libpg_query-
+
+      - name: Cache native wrapper libraries
+        if: matrix.os != 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: |
+            libpgquery_wrapper.so
+            libpgquery_wrapper.dylib
+            src/PgQuery.NET/runtimes/
+          key: ${{ runner.os }}-wrapper-${{ hashFiles('wrapper.c', 'libpg_query/libpg_query.a') }}
+          restore-keys: |
+            ${{ runner.os }}-wrapper-
 
       - name: Build native libraries
         shell: bash
@@ -46,12 +74,7 @@ jobs:
             exit 0
           fi
           
-          cd libpg_query
-          make clean
-          make
-          cd ..
-          
-          # Determine platform and create wrapper
+          # Determine platform
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
             LIBRARY_EXT="so"
             TARGET_RID="linux-x64"
@@ -64,8 +87,29 @@ jobs:
             fi
           fi
           
+          # Check if wrapper library already exists (from cache)
+          if [ -f "libpgquery_wrapper.$LIBRARY_EXT" ] && [ -f "src/PgQuery.NET/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" ]; then
+            echo "✅ Found cached native wrapper library - skipping expensive compilation"
+            ls -la "libpgquery_wrapper.$LIBRARY_EXT"
+            ls -la "src/PgQuery.NET/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT"
+            exit 0
+          fi
+          
+          # Check if libpg_query is cached
+          if [ ! -f "libpg_query/libpg_query.a" ]; then
+            echo "🔨 Building libpg_query (this takes ~3-5 minutes)..."
+            cd libpg_query
+            make clean
+            make
+            cd ..
+          else
+            echo "✅ Found cached libpg_query - skipping compilation"
+            ls -la libpg_query/libpg_query.a
+          fi
+          
           # Create wrapper.c if it doesn't exist
           if [ ! -f "wrapper.c" ]; then
+            echo "📝 Creating wrapper.c"
             cat > wrapper.c << 'EOF'
           #include "libpg_query/pg_query.h"
           
@@ -114,6 +158,7 @@ jobs:
           fi
           
           # Compile wrapper
+          echo "🔨 Compiling native wrapper library..."
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
             gcc -shared -fPIC -I. -o "libpgquery_wrapper.so" wrapper.c libpg_query/libpg_query.a
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
@@ -124,10 +169,24 @@ jobs:
           mkdir -p "src/PgQuery.NET/runtimes/$TARGET_RID/native"
           if [ -f "libpgquery_wrapper.$LIBRARY_EXT" ]; then
             cp "libpgquery_wrapper.$LIBRARY_EXT" "src/PgQuery.NET/runtimes/$TARGET_RID/native/"
+            echo "✅ Native library built and copied successfully"
+            ls -la "libpgquery_wrapper.$LIBRARY_EXT"
           fi
 
       - name: Restore dependencies
         run: dotnet restore
+
+      - name: Cache .NET build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/**/bin/
+            src/**/obj/
+            tests/**/bin/
+            tests/**/obj/
+          key: ${{ runner.os }}-build-${{ hashFiles('**/*.csproj', '**/*.cs', '**/*.props') }}
+          restore-keys: |
+            ${{ runner.os }}-build-
 
       - name: Build solution
         run: dotnet build --configuration Release --no-restore
