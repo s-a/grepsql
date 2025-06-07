@@ -10,8 +10,14 @@ Search through SQL files with powerful pattern matching:
 # Search for all SELECT statements with WHERE clauses
 ./grepsql.sh -p "(SelectStmt ... (whereClause ...))" -f "**/*.sql"
 
-# Find specific patterns in SQL code
-./grepsql.sh -p "(... (A_Expr (name [(String \">\")]) ...))" --from-sql "SELECT * FROM users WHERE age > 18"
+# Find specific table names with highlighting
+./grepsql.sh -p "(relname \"users\")" --from-sql "SELECT * FROM users JOIN products ON users.id = products.user_id" --highlight
+
+# Highlight matches in HTML format for documentation
+./grepsql.sh -p "(relname \"products\")" -f queries.sql --highlight --highlight-style html
+
+# Show highlighted matches in markdown format
+./grepsql.sh -p "(colname \"name\")" --from-sql "SELECT name FROM users" --highlight --highlight-style markdown
 
 # Show AST structure
 ./grepsql.sh -p "SelectStmt" --from-sql "SELECT id FROM users" --tree
@@ -55,6 +61,21 @@ SqlPatternMatcher.Matches("(BoolExpr (boolop \"AND_EXPR\"))", "SELECT * FROM use
 SqlPatternMatcher.Matches("(BoolExpr (boolop \"OR_EXPR\"))", "SELECT * FROM users WHERE age = 18 OR name = 'John'");
 ```
 
+#### **S-Expression Attribute Matching**
+```csharp
+// Match specific table names precisely
+SqlPatternMatcher.Matches("(relname \"users\")", "SELECT * FROM users JOIN products ON users.id = products.user_id");
+// Returns 1 match (only the users table, not products)
+
+// Match column names by attribute
+SqlPatternMatcher.Matches("(colname \"id\")", "SELECT id, name FROM users WHERE id > 10");
+// Returns matches for id column references
+
+// Match string constants by value
+SqlPatternMatcher.Matches("(sval \"admin\")", "SELECT * FROM users WHERE role = 'admin'");
+// Returns 1 match for the 'admin' string constant
+```
+
 #### **Capture and Search**
 ```csharp
 // Capture nodes for later analysis
@@ -93,7 +114,40 @@ var tables = result.GetTableNames(); // ["users", "orders"]
 var isSelect = result.IsSelectQuery(); // true
 ```
 
-### 5. 🛡️ **Error Handling**
+### 5. 🎨 **SQL Highlighting & Source Extraction**
+Highlight matching SQL parts with multiple output formats:
+```csharp
+// Extract source text from any AST node
+var sql = "SELECT id, name FROM users WHERE age > 18";
+var result = PgQuery.Parse(sql);
+var selectStmt = result.ParseTree.Stmts[0].Stmt;
+var sourceText = selectStmt.GetSource(); // "SELECT id, name FROM users WHERE age > 18"
+
+// Get location information from nodes
+var matches = SqlPatternMatcher.Search("(relname \"users\")", sql);
+var tableNode = matches[0];
+var location = LocationExtractor.GetLocation(tableNode, sql);
+// location.Line = 1, location.Column = 26, location.Text = "users"
+```
+
+**Command Line Highlighting:**
+```bash
+# ANSI colored output (default)
+./grepsql.sh -p "(relname \"users\")" --from-sql "SELECT * FROM users" --highlight
+
+# HTML output for web documentation
+./grepsql.sh -p "(relname \"users\")" --from-sql "SELECT * FROM users" --highlight --highlight-style html
+# Output: SELECT * FROM <mark>users</mark>
+
+# Markdown output for documentation
+./grepsql.sh -p "(relname \"users\")" --from-sql "SELECT * FROM users" --highlight --highlight-style markdown
+# Output: SELECT * FROM **users**
+
+# Show context lines around matches
+./grepsql.sh -p "(relname \"products\")" -f complex.sql --highlight --context 2
+```
+
+### 6. 🛡️ **Error Handling**
 Robust error handling with detailed information:
 ```csharp
 try
@@ -160,6 +214,7 @@ Our pattern matching uses both simple node type patterns and advanced Lisp-like 
 - `!(pattern)` - **Not**: Negation pattern (must not match)
 - `{value1 value2}` - **Any**: Match any of the listed values
 - `$name(pattern)` - **Capture**: Save matched node for later analysis
+- `(attribute "value")` - **S-Expression**: Match nodes by specific attribute values
 
 ## 📋 **Pattern Examples Table**
 
@@ -185,6 +240,9 @@ Our pattern matching uses both simple node type patterns and advanced Lisp-like 
 | `SELECT * FROM users WHERE age BETWEEN 18 AND 65` | `A_Expr` | BETWEEN expressions | ✅ 1 |
 | `SELECT DISTINCT name FROM users` | `SelectStmt` | DISTINCT queries | ✅ 1 |
 | `SELECT * FROM users ORDER BY name LIMIT 10` | `LimitOffset` | LIMIT clauses | ✅ 1 |
+| `SELECT * FROM users JOIN products ON users.id = products.user_id` | `(relname "users")` | Specific table by name | ✅ 1 (users only) |
+| `SELECT id, name, email FROM customers` | `(colname "name")` | Specific column by name | ✅ 1 |
+| `SELECT * FROM orders WHERE status = 'shipped'` | `(sval "shipped")` | Specific string constant | ✅ 1 |
 
 ### **Usage Examples**
 

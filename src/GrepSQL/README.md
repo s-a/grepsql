@@ -13,6 +13,9 @@ A powerful CLI tool for searching and filtering SQL files using pattern expressi
 - 📊 **Count Mode**: Get just the count of matches with `--count`
 - 📝 **Line Numbers**: Show line numbers in output with `--line-numbers`
 - 🎨 **Color Support**: Automatic color detection with `--no-color` override
+- ✨ **SQL Highlighting**: Highlight matching SQL parts with `--highlight`
+- 🎭 **Multiple Formats**: ANSI colors, HTML, and Markdown highlighting styles
+- 📄 **Context Lines**: Show surrounding context with `--context N`
 
 ## Installation
 
@@ -51,6 +54,9 @@ grepsql -p PATTERN [options]
 - `-c, --count` - Only print count of matches
 - `-n, --line-numbers` - Show line numbers in output
 - `--no-filename` - Don't show filename in output
+- `--highlight` - Highlight matching SQL parts in output
+- `--highlight-style` - Highlighting style: ansi (default), html, markdown
+- `--context N` - Show N context lines around matches (requires --highlight)
 
 ## Pattern Examples
 
@@ -76,6 +82,18 @@ grepsql -p "(SelectStmt (targetList ...) (fromClause ...))" -f queries.sql
 
 # Find UPDATE statements with WHERE clauses
 grepsql -p "(UpdateStmt (whereClause ...))" -f queries.sql
+```
+
+### S-Expression Attribute Patterns
+```bash
+# Find specific table references by name
+grepsql -p "(relname \"users\")" -f queries.sql
+
+# Find specific column references
+grepsql -p "(colname \"id\")" -f queries.sql
+
+# Find specific string constants
+grepsql -p "(sval \"admin\")" -f queries.sql
 ```
 
 ### Wildcard Patterns
@@ -121,6 +139,23 @@ grepsql -p "UpdateStmt" -f migrations.sql --tree --tree-mode=full
 ### Search from stdin
 ```bash
 cat queries.sql | grepsql -p "SelectStmt"
+```
+
+### SQL Highlighting Examples
+```bash
+# Highlight table names in ANSI colors (default)
+grepsql -p "(relname \"users\")" -f queries.sql --highlight
+
+# Generate HTML with highlighted matches for documentation
+grepsql -p "(relname \"products\")" -f queries.sql --highlight --highlight-style html
+# Output: SELECT * FROM <mark>products</mark>
+
+# Generate Markdown with highlighted matches
+grepsql -p "(colname \"name\")" -f queries.sql --highlight --highlight-style markdown
+# Output: SELECT **name** FROM users
+
+# Show context lines around matches
+grepsql -p "(relname \"orders\")" -f complex.sql --highlight --context 2
 ```
 
 ## Pattern Language
