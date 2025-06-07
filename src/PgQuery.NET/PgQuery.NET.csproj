@@ -9,8 +9,13 @@
     <PackageVersion>0.0.1</PackageVersion>
     <Title>PgQuery.NET</Title>
     <Authors>Jônatas Davi Paganini</Authors>
-    <Description>A .NET wrapper for libpg_query - parse, normalize, and fingerprint PostgreSQL queries using the actual PostgreSQL parser</Description>
-    <PackageTags>postgresql;sql;parser;ast;libpg_query;pgquery</PackageTags>
+    <Description>
+      A .NET wrapper for libpg_query - parse, normalize, and fingerprint PostgreSQL queries using the actual PostgreSQL parser.
+      You can also use it to analyze queries and find patterns using a simple DSL inspired by grep.
+      It's a wrapper for the [libpg_query](https://github.com/pganalyze/libpg_query) library, which is a C library that provides a parser for PostgreSQL.
+      Uses protobuf to serialize and deserialize the AST.
+    </Description>
+    <PackageTags>postgresql;sql;parser;search;grep;cli;libpg_query;pgquery;ast;query;analysis;pattern;matching;find;replace;rewrite</PackageTags>
     <RepositoryUrl>https://github.com/jonatas/pgquery-dotnet</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
@@ -33,9 +38,6 @@
 
   <PropertyGroup>
     <!-- Define native library names for different platforms -->
-    <PgQueryLibWin>pg_query.dll</PgQueryLibWin>
-    <PgQueryLibLinux>libpg_query.so</PgQueryLibLinux>
-    <PgQueryLibMac>libpg_query.dylib</PgQueryLibMac>
     <PgQueryWrapperWin>pgquery_wrapper.dll</PgQueryWrapperWin>
     <PgQueryWrapperLinux>libpgquery_wrapper.so</PgQueryWrapperLinux>
     <PgQueryWrapperMac>libpgquery_wrapper.dylib</PgQueryWrapperMac>
@@ -52,29 +54,14 @@
 
   <!-- Native libraries for Windows -->
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
-    <Content Include="runtimes\win-x64\native\$(PgQueryLibWin)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PackagePath>runtimes\win-x64\native\$(PgQueryLibWin)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
     <Content Include="runtimes\win-x64\native\$(PgQueryWrapperWin)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <PackagePath>runtimes\win-x64\native\$(PgQueryWrapperWin)</PackagePath>
       <Pack>true</Pack>
     </Content>
-    <Content Include="runtimes\win-x86\native\$(PgQueryLibWin)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PackagePath>runtimes\win-x86\native\$(PgQueryLibWin)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
     <Content Include="runtimes\win-x86\native\$(PgQueryWrapperWin)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <PackagePath>runtimes\win-x86\native\$(PgQueryWrapperWin)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
-    <Content Include="runtimes\win-arm64\native\$(PgQueryLibWin)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PackagePath>runtimes\win-arm64\native\$(PgQueryLibWin)</PackagePath>
       <Pack>true</Pack>
     </Content>
     <Content Include="runtimes\win-arm64\native\$(PgQueryWrapperWin)">
@@ -92,19 +79,9 @@
 
   <!-- Native libraries for Linux -->
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
-    <Content Include="runtimes\linux-x64\native\$(PgQueryLibLinux)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PackagePath>runtimes\linux-x64\native\$(PgQueryLibLinux)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
     <Content Include="runtimes\linux-x64\native\$(PgQueryWrapperLinux)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <PackagePath>runtimes\linux-x64\native\$(PgQueryWrapperLinux)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
-    <Content Include="runtimes\linux-arm64\native\$(PgQueryLibLinux)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PackagePath>runtimes\linux-arm64\native\$(PgQueryLibLinux)</PackagePath>
       <Pack>true</Pack>
     </Content>
     <Content Include="runtimes\linux-arm64\native\$(PgQueryWrapperLinux)">
@@ -122,19 +99,9 @@
 
   <!-- Native libraries for macOS -->
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
-    <Content Include="runtimes\osx-x64\native\$(PgQueryLibMac)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PackagePath>runtimes\osx-x64\native\$(PgQueryLibMac)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
     <Content Include="runtimes\osx-x64\native\$(PgQueryWrapperMac)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <PackagePath>runtimes\osx-x64\native\$(PgQueryWrapperMac)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
-    <Content Include="runtimes\osx-arm64\native\$(PgQueryLibMac)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <PackagePath>runtimes\osx-arm64\native\$(PgQueryLibMac)</PackagePath>
       <Pack>true</Pack>
     </Content>
     <Content Include="runtimes\osx-arm64\native\$(PgQueryWrapperMac)">

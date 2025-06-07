@@ -369,3 +369,36 @@ cd ..
 git add libpg_query
 git commit -m "Update libpg_query submodule"
 ```
+
+### Advanced Pattern Matching
+
+GrepSQL supports complex pattern combinations and precise node searches:
+
+```bash
+# Find queries with both column references AND constants
+./grepsql.sh -p "{ColumnRef A_Const}" sample1.sql --highlight
+
+# Output shows all SQL statements containing both patterns:
+# sample1.sql:SELECT id, name, email
+# FROM users
+# WHERE active = true;
+# 
+# sample1.sql:INSERT INTO users (name, email, created_at)  
+# VALUES ('John Doe', 'john@example.com', NOW());
+# 
+# sample1.sql:UPDATE users 
+# SET last_login = NOW()
+# WHERE id = 123;
+```
+
+**Pattern Types:**
+- `{ColumnRef A_Const}` - Finds queries with column references AND constants
+- `(relname "users")` - S-expression: finds specific table references  
+- `ColumnRef` - Simple node type matching
+- `SelectStmt` - Finds all SELECT statements
+
+**Highlighting Options:**
+- `--highlight` - ANSI colors for terminal
+- `--highlight-style html` - HTML `<mark>` tags
+- `--highlight-style markdown` - Markdown **bold** syntax
+- `--context 2` - Show surrounding lines

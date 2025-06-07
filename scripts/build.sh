@@ -97,12 +97,7 @@ fi
 echo "📁 Setting up runtime directories..."
 mkdir -p "runtimes/$TARGET_RID/native"
 
-# Copy both libraries
-if [ -f "libpg_query/libpg_query.$LIBRARY_EXT" ]; then
-    echo "Copying libpg_query.$LIBRARY_EXT to runtimes/$TARGET_RID/native/"
-    cp "libpg_query/libpg_query.$LIBRARY_EXT" "runtimes/$TARGET_RID/native/"
-fi
-
+# Copy wrapper library (the static library is linked into the wrapper)
 if [ -f "libpgquery_wrapper.$LIBRARY_EXT" ]; then
     echo "Copying libpgquery_wrapper.$LIBRARY_EXT to runtimes/$TARGET_RID/native/"
     cp "libpgquery_wrapper.$LIBRARY_EXT" "runtimes/$TARGET_RID/native/"

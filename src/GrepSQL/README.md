@@ -253,4 +253,40 @@ This will show:
 
 ## Contributing
 
-This tool is built on top of [PgQuery.NET](../PgQuery.NET) and uses the fixed SqlPatternMatcher for pattern matching capabilities. 
+This tool is built on top of [PgQuery.NET](../PgQuery.NET) and uses the fixed SqlPatternMatcher for pattern matching capabilities.
+
+## 🔥 Advanced Examples
+
+### Complex Pattern Matching
+Find SQL statements with both column references and constants:
+```bash
+grepsql -p "{ColumnRef A_Const}" sample.sql --highlight
+```
+
+This finds queries like:
+- `SELECT id FROM users WHERE active = true` (has both `id` column and `true` constant)
+- `UPDATE users SET name = 'John' WHERE id = 123` (has columns and string/number constants)
+
+### S-Expression Searches
+Find specific table references:
+```bash
+grepsql -p "(relname \"users\")" --files "*.sql"
+```
+
+### Highlighting Output
+```bash
+# Terminal colors
+grepsql -p "SelectStmt" sample.sql --highlight
+
+# HTML output  
+grepsql -p "ColumnRef" sample.sql --highlight-style html > results.html
+
+# Markdown format
+grepsql -p "UpdateStmt" sample.sql --highlight-style markdown --context 3
+```
+
+### Performance Testing
+```bash
+# Search large codebases
+grepsql -p "JoinExpr" --files "**/*.sql" --recursive
+``` 
