@@ -122,7 +122,20 @@ namespace PgQuery.NET.Analysis
                 var ast = PgQuery.Parse(sql);
                 var results = new List<IMessage>();
                 
-                SearchRecursive(expression, ast.ParseTree.Stmts[0].Stmt, results);
+                // For simple wildcard patterns like "_", only check the root node
+                if (pattern == "_" || pattern == "..." || pattern == "nil")
+                {
+                    var rootNode = ast.ParseTree.Stmts[0].Stmt;
+                    if (expression.Match(rootNode))
+                    {
+                        results.Add(rootNode);
+                    }
+                }
+                else
+                {
+                    // For specific node types or complex patterns, search recursively
+                    SearchRecursive(expression, ast.ParseTree.Stmts[0].Stmt, results);
+                }
                 
                 if (debug)
                 {

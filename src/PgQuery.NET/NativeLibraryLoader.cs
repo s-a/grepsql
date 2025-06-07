@@ -53,13 +53,6 @@ namespace PgQuery.NET
                     }
 
                     var handle = LoadLibrary(libraryPath);
-                    if (handle == IntPtr.Zero)
-                    {
-                        var error = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) 
-                            ? Marshal.GetLastWin32Error().ToString()
-                            : "Unknown error";
-                        throw new DllNotFoundException($"Failed to load library from {libraryPath}. Error: {error}");
-                    }
 
                     _loaded = true;
                 }
@@ -121,7 +114,15 @@ namespace PgQuery.NET
             else
             {
                 // RTLD_NOW | RTLD_GLOBAL = 2 | 8 = 10
-                return dlopen(path, 10);
+                var handle = dlopen(path, 10);
+                if (handle == IntPtr.Zero)
+                {
+                    // Get detailed error message from dlerror
+                    var errorPtr = dlerror();
+                    var error = errorPtr != IntPtr.Zero ? Marshal.PtrToStringUTF8(errorPtr) : "Unknown dlopen error";
+                    throw new DllNotFoundException($"Failed to load library from {path}. Error: {error}");
+                }
+                return handle;
             }
         }
 
@@ -130,5 +131,8 @@ namespace PgQuery.NET
 
         [DllImport("libdl", CharSet = CharSet.Ansi)]
         private static extern IntPtr dlopen(string filename, int flags);
+
+        [DllImport("libdl")]
+        private static extern IntPtr dlerror();
     }
 }
