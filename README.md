@@ -142,21 +142,75 @@ bool matches = SqlPatternMatcher.Matches("(... (whereClause ...))", sql);
 
 ## 📖 **Pattern Syntax Guide**
 
-Our pattern matching uses a Lisp-like syntax that mirrors the PostgreSQL AST structure:
+Our pattern matching uses both simple node type patterns and advanced Lisp-like syntax:
 
-### **Basic Patterns**
+### **Simple Patterns (Recommended)**
+- `_` - Match any single node (root only)
+- `...` - Match any node with children (root only)  
+- `NodeType` - Find all nodes of this type (recursive search)
+- `A_Const` - Find all constants (numbers, strings, booleans)
+- `SelectStmt` - Find all SELECT statements
+
+### **Advanced Patterns**
 - `(NodeType ...)` - Match any node of this type
 - `(NodeType (field ...))` - Match field within node  
 - `(NodeType (field value))` - Match exact field value
-
-### **Advanced Patterns**
 - `(... pattern)` - **Ellipsis**: Find pattern anywhere in subtree
 - `?(pattern)` - **Maybe**: Optional pattern (field may be null)
 - `!(pattern)` - **Not**: Negation pattern (must not match)
 - `{value1 value2}` - **Any**: Match any of the listed values
 - `$name(pattern)` - **Capture**: Save matched node for later analysis
 
-### **Real Examples**
+## 📋 **Pattern Examples Table**
+
+| SQL Query | Pattern | Description | Matches |
+|-----------|---------|-------------|---------|
+| `SELECT id FROM users` | `_` | Any single node | ✅ 1 (root node) |
+| `SELECT id FROM users` | `SelectStmt` | SELECT statements | ✅ 1 |
+| `SELECT 1, 'hello', true` | `A_Const` | All constants | ✅ 3 (1, 'hello', true) |
+| `SELECT * FROM users WHERE age > 25` | `A_Expr` | Expressions | ✅ 1 (age > 25) |
+| `SELECT COUNT(*), AVG(age)` | `FuncCall` | Function calls | ✅ 2 (COUNT, AVG) |
+| `SELECT u.name FROM users u` | `ColumnRef` | Column references | ✅ 1 (u.name) |
+| `SELECT * FROM users WHERE active = true` | `BoolExpr` | Boolean expressions | ✅ 0 (no AND/OR) |
+| `SELECT * FROM users WHERE age > 18 AND active = true` | `BoolExpr` | Boolean expressions | ✅ 1 (AND) |
+| `INSERT INTO users (name) VALUES ('John')` | `InsertStmt` | INSERT statements | ✅ 1 |
+| `UPDATE users SET active = false` | `UpdateStmt` | UPDATE statements | ✅ 1 |
+| `DELETE FROM users WHERE id = 1` | `DeleteStmt` | DELETE statements | ✅ 1 |
+| `SELECT * FROM users u JOIN orders o ON u.id = o.user_id` | `JoinExpr` | JOIN operations | ✅ 1 |
+| `SELECT name, CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END` | `CaseExpr` | CASE expressions | ✅ 1 |
+| `SELECT name FROM (SELECT * FROM users) subq` | `SubLink` | Subqueries | ✅ 1 |
+| `WITH cte AS (SELECT * FROM users) SELECT * FROM cte` | `WithClause` | CTE definitions | ✅ 1 |
+| `SELECT * FROM users UNION SELECT * FROM customers` | `SelectStmt` | UNION operations | ✅ 2 (both SELECTs) |
+| `SELECT * FROM users WHERE name IS NULL` | `NullTest` | NULL tests | ✅ 1 |
+| `SELECT * FROM users WHERE age BETWEEN 18 AND 65` | `A_Expr` | BETWEEN expressions | ✅ 1 |
+| `SELECT DISTINCT name FROM users` | `SelectStmt` | DISTINCT queries | ✅ 1 |
+| `SELECT * FROM users ORDER BY name LIMIT 10` | `LimitOffset` | LIMIT clauses | ✅ 1 |
+
+### **Usage Examples**
+
+```bash
+# Find all constants in a query
+./grepsql.sh -p "A_Const" --from-sql "SELECT 1, 'hello', true"
+# Result: Found 3 matches
+
+# Find all function calls
+./grepsql.sh -p "FuncCall" --from-sql "SELECT COUNT(*), AVG(age) FROM users"
+# Result: Found 2 matches
+
+# Check if query has WHERE clause
+./grepsql.sh -p "A_Expr" --from-sql "SELECT * FROM users WHERE age > 18"
+# Result: Found 1 matches (indicates WHERE clause exists)
+
+# Find JOIN operations
+./grepsql.sh -p "JoinExpr" --from-sql "SELECT * FROM users u JOIN orders o ON u.id = o.user_id"
+# Result: Found 1 matches
+
+# Test with wildcard (any single node)
+./grepsql.sh -p "_" --from-sql "SELECT id FROM users"
+# Result: Found 1 matches (root node only)
+```
+
+### **Advanced Pattern Examples**
 ```bash
 # Find all WHERE clauses (anywhere in the query)
 ./grepsql.sh -p "(... (whereClause ...))" --from-sql "SELECT * FROM users WHERE age > 18"
