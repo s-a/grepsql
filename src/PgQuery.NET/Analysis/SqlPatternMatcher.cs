@@ -404,6 +404,94 @@ namespace PgQuery.NET.Analysis
             return (_expressionCache.Count, MAX_CACHE_SIZE);
         }
 
+        // Shared case conversion utilities
+        private static bool HandleCaseConversions(string? value, string? target)
+        {
+            if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(target)) return false;
+            
+            // Handle boolean values: true/false vs True/False
+            if ((value == "True" && target == "true") || 
+                (value == "true" && target == "True") ||
+                (value == "False" && target == "false") || 
+                (value == "false" && target == "False"))
+            {
+                return true;
+            }
+            
+            // Handle camelCase to underscore conversion for node types
+            // e.g., SelectStmt vs select_stmt, A_Const vs a_const
+            if (ConvertCamelToUnderscore(value) == target.ToLowerInvariant() ||
+                ConvertCamelToUnderscore(target) == value.ToLowerInvariant())
+            {
+                return true;
+            }
+            
+            // Handle underscore to camelCase conversion
+            if (ConvertUnderscoreToCamel(value) == target ||
+                ConvertUnderscoreToCamel(target) == value)
+            {
+                return true;
+            }
+            
+            return false;
+        }
+        
+        // Convert camelCase/PascalCase to underscore_case
+        private static string ConvertCamelToUnderscore(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+            
+            var result = new System.Text.StringBuilder();
+            
+            for (int i = 0; i < input.Length; i++)
+            {
+                char c = input[i];
+                
+                // Add underscore before uppercase letters (except first character)
+                if (i > 0 && char.IsUpper(c))
+                {
+                    result.Append('_');
+                }
+                
+                result.Append(char.ToLowerInvariant(c));
+            }
+            
+            return result.ToString();
+        }
+        
+        // Convert underscore_case to camelCase
+        private static string ConvertUnderscoreToCamel(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+            
+            var result = new System.Text.StringBuilder();
+            bool capitalizeNext = false;
+            
+            for (int i = 0; i < input.Length; i++)
+            {
+                char c = input[i];
+                
+                if (c == '_')
+                {
+                    capitalizeNext = true;
+                }
+                else
+                {
+                    if (capitalizeNext)
+                    {
+                        result.Append(char.ToUpperInvariant(c));
+                        capitalizeNext = false;
+                    }
+                    else
+                    {
+                        result.Append(c);
+                    }
+                }
+            }
+            
+            return result.ToString();
+        }
+
         // Core Expression Interface
         private interface IExpression
         {
@@ -423,6 +511,8 @@ namespace PgQuery.NET.Analysis
                 _targetString = target?.ToString() ?? "";
                 _isWildcard = _targetString == "_";
             }
+            
+            public bool IsEllipsis() => _targetString == "...";
 
             public bool Match(IMessage node)
             {
@@ -437,8 +527,9 @@ namespace PgQuery.NET.Analysis
                     return HasChildren(node);
                 }
 
-                // Check node type
-                if (node.Descriptor?.Name == _targetString)
+                // Check node type with case-insensitive and case conversion support
+                var nodeTypeName = node.Descriptor?.Name;
+                if (nodeTypeName != null && MatchesNodeType(nodeTypeName, _targetString))
                 {
                     return true;
                 }
@@ -459,8 +550,24 @@ namespace PgQuery.NET.Analysis
 
                 return false;
             }
+            
+            // Enhanced node type matching with case conversion support
+            private bool MatchesNodeType(string nodeType, string pattern)
+            {
+                // Direct match
+                if (nodeType == pattern) return true;
+                
+                // Case-insensitive match
+                if (string.Equals(nodeType, pattern, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                
+                // Handle case conversions
+                return SqlPatternMatcher.HandleCaseConversions(nodeType, pattern);
+            }
 
-            // Performance: Optimized value matching
+            // Performance: Optimized value matching with case-insensitive handling
             private bool MatchesValue(object value, object target)
             {
                 if (value == null || target == null) return value == target;
@@ -469,7 +576,22 @@ namespace PgQuery.NET.Analysis
                 if (value.Equals(target)) return true;
                 
                 // String comparison (case-sensitive for performance)
-                if (value.ToString() == target.ToString()) return true;
+                var valueStr = value.ToString();
+                var targetStr = target.ToString();
+                
+                if (valueStr == targetStr) return true;
+                
+                // Case-insensitive comparison for common patterns
+                if (string.Equals(valueStr, targetStr, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                
+                // Handle common case conversions (camelCase vs lowercase)
+                if (SqlPatternMatcher.HandleCaseConversions(valueStr, targetStr))
+                {
+                    return true;
+                }
                 
                 // Numeric comparison for different types
                 if (IsNumeric(value) && IsNumeric(target))
@@ -483,7 +605,41 @@ namespace PgQuery.NET.Analysis
                         return false;
                     }
                 }
+                
+                // For protobuf nested structures, recursively check nested values
+                if (value is IMessage nestedMessage)
+                {
+                    return MatchesNestedValue(nestedMessage, target);
+                }
 
+                return false;
+            }
+
+            
+            private bool MatchesNestedValue(IMessage message, object target)
+            {
+                var descriptor = message.Descriptor;
+                if (descriptor == null) return false;
+
+                foreach (var field in descriptor.Fields.InFieldNumberOrder())
+                {
+                    var fieldValue = field.Accessor.GetValue(message);
+                    
+                    if (fieldValue != null)
+                    {
+                        // Direct match
+                        if (MatchesValue(fieldValue, target)) return true;
+                        
+                        // For repeated fields
+                        if (field.IsRepeated && fieldValue is System.Collections.IList list)
+                        {
+                            foreach (var item in list)
+                            {
+                                if (item != null && MatchesValue(item, target)) return true;
+                            }
+                        }
+                    }
+                }
                 return false;
             }
 
@@ -551,10 +707,75 @@ namespace PgQuery.NET.Analysis
 
             public bool Match(IMessage node)
             {
-                // Performance: Short-circuit on first failure
+                // Handle special case for recursive child validation patterns like (A_Const ... (_ {true 1}))
+                // Check if pattern has form: nodeType + "..." + childPattern
+                if (_expressions.Length >= 3 && 
+                    _expressions[1] is Find ellipsisFind && ellipsisFind.IsEllipsis())
+                {
+                    // First expression should match the current node
+                    if (!_expressions[0].Match(node)) return false;
+                    
+                    // Second expression (...) should confirm node has children
+                    if (!_expressions[1].Match(node)) return false;
+                    
+                    // Remaining expressions should match against children
+                    var childExpressions = _expressions.Skip(2).ToArray();
+                    if (childExpressions.Length > 0)
+                    {
+                        return MatchChildren(node, childExpressions);
+                    }
+                    return true;
+                }
+                
+                // Standard All behavior: all expressions must match the same node
                 foreach (var expr in _expressions)
                 {
                     if (!expr.Match(node)) return false;
+                }
+                return true;
+            }
+            
+            private bool MatchChildren(IMessage node, IExpression[] childExpressions)
+            {
+                if (node == null) return false;
+
+                var descriptor = node.Descriptor;
+                if (descriptor == null) return false;
+
+                // Check each child field
+                foreach (var field in descriptor.Fields.InFieldNumberOrder())
+                {
+                    if (field.IsRepeated)
+                    {
+                        var list = (System.Collections.IList)field.Accessor.GetValue(node);
+                        if (list != null)
+                        {
+                            foreach (var item in list)
+                            {
+                                if (item is IMessage child && MatchAllChildExpressions(child, childExpressions))
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var value = field.Accessor.GetValue(node);
+                        if (value is IMessage child && MatchAllChildExpressions(child, childExpressions))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            
+            private bool MatchAllChildExpressions(IMessage child, IExpression[] expressions)
+            {
+                foreach (var expr in expressions)
+                {
+                    if (!expr.Match(child)) return false;
                 }
                 return true;
             }
