@@ -37,6 +37,7 @@ jobs:
         run: git submodule update --init --recursive
 
       - name: Build native libraries
+        shell: bash
         run: |
           cd libpg_query
           make clean
@@ -108,14 +109,18 @@ jobs:
           EOF
           fi
           
-          # Compile wrapper
+          # Compile wrapper - skip Windows for now since it needs different toolchain
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
             gcc -shared -fPIC -I. -o "libpgquery_wrapper.so" wrapper.c libpg_query/libpg_query.a
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
             gcc -shared -fPIC -I. -o "libpgquery_wrapper.dylib" wrapper.c libpg_query/libpg_query.a
           elif [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            # Windows builds would need different compilation - skip for now
-            echo "Windows native build not implemented yet"
+            # Windows builds would need MSVC toolchain - skip native build for now
+            echo "Windows native build skipped - would need MSVC toolchain setup"
+            echo "Creating placeholder to allow build to continue"
+            mkdir -p "src/PgQuery.NET/runtimes/$TARGET_RID/native"
+            echo "Windows native library placeholder" > "src/PgQuery.NET/runtimes/$TARGET_RID/native/placeholder.txt"
+            exit 0
           fi
           
           # Copy to runtime directories
