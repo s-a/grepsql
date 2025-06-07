@@ -7,24 +7,16 @@ echo "🏗️  Building PgQuery.NET with libpg_query..."
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$SCRIPT_DIR/.."
 
-# Configuration
-LIBPG_QUERY_BRANCH="17-latest"
-LIBPG_QUERY_REPO="https://github.com/pganalyze/libpg_query.git"
-
 cd "$PROJECT_ROOT"
 
-# Step 1: Clone and build libpg_query
-echo "📥 Setting up libpg_query..."
-if [ ! -d "libpg_query" ]; then
-    echo "Cloning libpg_query (branch: $LIBPG_QUERY_BRANCH)..."
-    git clone -b "$LIBPG_QUERY_BRANCH" "$LIBPG_QUERY_REPO"
+# Step 1: Initialize and update git submodules
+echo "📥 Setting up libpg_query submodule..."
+if [ ! -f "libpg_query/Makefile" ]; then
+    echo "Initializing and fetching libpg_query submodule..."
+    git submodule update --init --recursive
 else
-    echo "libpg_query already exists, updating..."
-    cd libpg_query
-    git fetch origin
-    git checkout "$LIBPG_QUERY_BRANCH"
-    git pull origin "$LIBPG_QUERY_BRANCH"
-    cd ..
+    echo "libpg_query submodule already initialized, updating..."
+    git submodule update --recursive
 fi
 
 cd libpg_query

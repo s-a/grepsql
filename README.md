@@ -339,3 +339,33 @@ This project is licensed under the MIT License.
 
 - [libpg_query](https://github.com/pganalyze/libpg_query) - The core PostgreSQL parser library
 - PostgreSQL community for the robust SQL grammar
+
+## Development Setup
+
+This repository uses git submodules for the libpg_query dependency. After cloning:
+
+```bash
+# Clone the repository
+git clone https://github.com/jonatas/pgquery-dotnet.git
+cd pgquery-dotnet
+
+# Initialize and fetch submodules
+git submodule update --init --recursive
+
+# Build the project
+./scripts/build.sh
+```
+
+### Working with Submodules
+
+The `libpg_query` directory is a git submodule pointing to the official [libpg_query repository](https://github.com/pganalyze/libpg_query). This keeps our repository lightweight while maintaining access to the PostgreSQL parser.
+
+To update the submodule to a newer version:
+```bash
+cd libpg_query
+git fetch origin
+git checkout 17-latest  # or desired version
+cd ..
+git add libpg_query
+git commit -m "Update libpg_query submodule"
+```
