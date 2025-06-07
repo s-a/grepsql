@@ -92,7 +92,7 @@ namespace PgQuery.NET.Tests
             _output.WriteLine("✅ Debug mode works without crashing");
         }
 
-        private void AssertMatch(string pattern, string sql, string description = null)
+        private void AssertMatch(string pattern, string sql, string? description = null)
         {
             // Use our new SqlPatternMatcher API
             var result = SqlPatternMatcher.Match(pattern, sql);
@@ -102,12 +102,12 @@ namespace PgQuery.NET.Tests
                 var (success, details) = SqlPatternMatcher.MatchWithDetails(pattern, sql, debug: true);
                 _output.WriteLine($"Pattern matching failed for: {description ?? pattern}");
                 _output.WriteLine(details);
-                Assert.True(false, $"Pattern should match. Details:\\n{details}");
+                Assert.Fail($"Pattern should match. Details:\\n{details}");
             }
             Assert.True(result, "Pattern should match");
         }
 
-        private void AssertNotMatch(string pattern, string sql, string description = null)
+        private void AssertNotMatch(string pattern, string sql, string? description = null)
         {
             var (success, details) = SqlPatternMatcher.MatchWithDetails(pattern, sql);
             if (success)
@@ -288,7 +288,7 @@ namespace PgQuery.NET.Tests
                 }
             }
             
-            Assert.True(false, "BoolExpr not found in WHERE clause");
+            Assert.Fail("BoolExpr not found in WHERE clause");
         }
 
         [Fact]
