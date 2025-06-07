@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Update NuGet dependencies
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 2 
+    reviewers:
+      - "jonatas"
+    assignees:
+      - "jonatas"
+    commit-message:
+      prefix: "deps:"
+      include: "scope"
+
+  # Update GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/.github/workflows"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 2
+    reviewers:
+      - "jonatas"
+    assignees:
+      - "jonatas"
+    commit-message:
+      prefix: "ci:"
+      include: "scope" 

@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Is this a pre-release?'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Validate version format
+      run: |
+        if [[ ! "${{ github.event.inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "❌ Invalid version format. Please use semantic versioning (e.g., 1.0.0)"
+          exit 1
+        fi
+        echo "✅ Version format is valid"
+
+    - name: Check if tag exists
+      run: |
+        if git tag -l | grep -q "^v${{ github.event.inputs.version }}$"; then
+          echo "❌ Tag v${{ github.event.inputs.version }} already exists"
+          exit 1
+        fi
+        echo "✅ Tag is available"
+
+    - name: Update version in project files
+      run: |
+        # Update version in csproj files
+        sed -i 's/<Version>.*<\/Version>/<Version>${{ github.event.inputs.version }}<\/Version>/' src/PgQuery.NET/PgQuery.NET.csproj
+        sed -i 's/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>${{ github.event.inputs.version }}<\/AssemblyVersion>/' src/PgQuery.NET/PgQuery.NET.csproj
+        sed -i 's/<FileVersion>.*<\/FileVersion>/<FileVersion>${{ github.event.inputs.version }}<\/FileVersion>/' src/PgQuery.NET/PgQuery.NET.csproj
+        
+        # Update GrepSQL version
+        sed -i 's/<Version>.*<\/Version>/<Version>${{ github.event.inputs.version }}<\/Version>/' src/GrepSQL/GrepSQL/GrepSQL.csproj
+
+    - name: Build and test
+      run: |
+        dotnet restore
+        dotnet build --configuration Release --no-restore
+        dotnet test --configuration Release --no-build
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        # Get commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -z "$LAST_TAG" ]; then
+          COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
+        else
+          COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+        fi
+        
+        # Create release notes
+        cat > release_notes.md << EOF
+        ## 🚀 PgQuery.NET v${{ github.event.inputs.version }}
+        
+        ### ✨ Features
+        - Advanced SQL pattern matching with s-expression support
+        - SQL highlighting in ANSI, HTML, and Markdown formats
+        - Powerful GrepSQL command-line tool
+        - Comprehensive PostgreSQL AST analysis
+        
+        ### 📋 Changes in this release
+        $COMMITS
+        
+        ### 📦 Downloads
+        - **NuGet Package**: Available on [NuGet.org](https://www.nuget.org/packages/PgQuery.NET/)
+        - **GrepSQL Binaries**: Download platform-specific binaries below
+        
+        ### 🛠️ Usage
+        \`\`\`bash
+        # Install via .NET CLI
+        dotnet add package PgQuery.NET
+        
+        # Use GrepSQL
+        grepsql -p "(relname \"users\")" --from-sql "SELECT * FROM users" --highlight
+        \`\`\`
+        
+        ### 📚 Documentation
+        See the [README](https://github.com/jonatas/pgquery-dotnet#readme) for full documentation and examples.
+        EOF
+
+    - name: Commit version updates
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .
+        git commit -m "chore: bump version to ${{ github.event.inputs.version }}" || exit 0
+        git push
+
+    - name: Create tag
+      run: |
+        git tag -a "v${{ github.event.inputs.version }}" -m "Release v${{ github.event.inputs.version }}"
+        git push origin "v${{ github.event.inputs.version }}"
+
+    - name: Create GitHub release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.event.inputs.version }}
+        release_name: 🚀 PgQuery.NET v${{ github.event.inputs.version }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: ${{ github.event.inputs.prerelease }}
+
+    - name: Success notification
+      run: |
+        echo "🎉 Release v${{ github.event.inputs.version }} created successfully!"
+        echo "📦 NuGet package will be published automatically"
+        echo "🔧 Cross-platform binaries will be built and attached to the release" 

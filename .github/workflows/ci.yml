@@ -1,0 +1,174 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_FRAMEWORK_VERSION: '9.0.x'
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: |
+          ${{ env.DOTNET_VERSION }}
+          ${{ env.DOTNET_FRAMEWORK_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build solution
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Run tests
+      run: dotnet test --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"
+
+    - name: Upload coverage reports
+      if: matrix.os == 'ubuntu-latest'
+      uses: codecov/codecov-action@v3
+      with:
+        files: '**/coverage.cobertura.xml'
+        fail_ci_if_error: false
+
+    - name: Test GrepSQL CLI
+      shell: bash
+      run: |
+        # Test basic functionality
+        dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "SelectStmt" --from-sql "SELECT id FROM users" --count
+        
+        # Test s-expression patterns
+        dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "(relname \"users\")" --from-sql "SELECT * FROM users" --count
+        
+        # Test highlighting
+        dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "(relname \"users\")" --from-sql "SELECT * FROM users" --highlight --highlight-style html
+
+  package:
+    name: Create NuGet Package
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'release'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build for packaging
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Pack NuGet package
+      run: dotnet pack src/PgQuery.NET/PgQuery.NET.csproj --configuration Release --no-build --output ./artifacts
+
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuget-packages
+        path: ./artifacts/*.nupkg
+
+    - name: Publish to NuGet (if main branch and release)
+      if: github.ref == 'refs/heads/main' && github.event_name == 'release'
+      run: |
+        dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      continue-on-error: true
+
+  release-binaries:
+    name: Create Release Binaries
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'release'
+    strategy:
+      matrix:
+        runtime: [win-x64, linux-x64, osx-x64, osx-arm64]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_FRAMEWORK_VERSION }}
+
+    - name: Publish GrepSQL for ${{ matrix.runtime }}
+      run: |
+        dotnet publish src/GrepSQL/GrepSQL/GrepSQL.csproj \
+          --configuration Release \
+          --runtime ${{ matrix.runtime }} \
+          --self-contained true \
+          --output ./dist/${{ matrix.runtime }} \
+          -p:PublishSingleFile=true \
+          -p:IncludeNativeLibrariesForSelfExtract=true
+
+    - name: Create archive
+      shell: bash
+      run: |
+        cd ./dist/${{ matrix.runtime }}
+        if [[ "${{ matrix.runtime }}" == win-* ]]; then
+          7z a ../../grepsql-${{ matrix.runtime }}.zip *
+        else
+          tar czf ../../grepsql-${{ matrix.runtime }}.tar.gz *
+        fi
+
+    - name: Upload release assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./grepsql-${{ matrix.runtime }}.${{ matrix.runtime == 'win-x64' && 'zip' || 'tar.gz' }}
+        asset_name: grepsql-${{ matrix.runtime }}.${{ matrix.runtime == 'win-x64' && 'zip' || 'tar.gz' }}
+        asset_content_type: application/octet-stream
+
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Run performance tests
+      shell: bash
+      run: |
+        echo "Running basic performance tests..."
+        
+        # Test large query parsing performance
+        time dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "SelectStmt" --from-sql "$(printf 'SELECT id FROM users UNION %.0s' {1..100})" --count
+        
+        # Test complex pattern matching performance  
+        time dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "(... (whereClause ...))" --from-sql "SELECT * FROM users WHERE age > 18 AND status = 'active' AND created_at > '2024-01-01'" --count 
