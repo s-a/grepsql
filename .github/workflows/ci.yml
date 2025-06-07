@@ -26,12 +26,103 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Setup .NET Core
+    - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: |
           ${{ env.DOTNET_VERSION }}
           ${{ env.DOTNET_FRAMEWORK_VERSION }}
+
+    - name: Initialize submodules
+      run: git submodule update --init --recursive
+
+    - name: Build native libraries
+      run: |
+        cd libpg_query
+        make clean
+        make
+        cd ..
+        
+        # Determine platform and create wrapper
+        if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+          LIBRARY_EXT="so"
+          TARGET_RID="linux-x64"
+        elif [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          LIBRARY_EXT="dll"
+          TARGET_RID="win-x64"
+        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+          LIBRARY_EXT="dylib"
+          if [[ $(uname -m) == "arm64" ]]; then
+            TARGET_RID="osx-arm64"
+          else
+            TARGET_RID="osx-x64"
+          fi
+        fi
+        
+        # Create wrapper.c if it doesn't exist
+        if [ ! -f "wrapper.c" ]; then
+          cat > wrapper.c << 'EOF'
+        #include "libpg_query/pg_query.h"
+        
+        // Simple wrapper to export pg_query functions
+        PgQueryParseResult pg_query_parse_wrapper(const char* input) {
+            return pg_query_parse(input);
+        }
+        
+        void pg_query_free_parse_result_wrapper(PgQueryParseResult result) {
+            pg_query_free_parse_result(result);
+        }
+        
+        PgQueryNormalizeResult pg_query_normalize_wrapper(const char* input) {
+            return pg_query_normalize(input);
+        }
+        
+        void pg_query_free_normalize_result_wrapper(PgQueryNormalizeResult result) {
+            pg_query_free_normalize_result(result);
+        }
+        
+        // Protobuf wrapper functions
+        PgQueryProtobufParseResult pg_query_parse_protobuf_wrapper(const char* input) {
+            return pg_query_parse_protobuf(input);
+        }
+        
+        void pg_query_free_protobuf_parse_result_wrapper(PgQueryProtobufParseResult result) {
+            pg_query_free_protobuf_parse_result(result);
+        }
+        
+        PgQueryFingerprintResult pg_query_fingerprint_wrapper(const char* input) {
+            return pg_query_fingerprint(input);
+        }
+        
+        void pg_query_free_fingerprint_result_wrapper(PgQueryFingerprintResult result) {
+            pg_query_free_fingerprint_result(result);
+        }
+        
+        PgQueryScanResult pg_query_scan_wrapper(const char* input) {
+            return pg_query_scan(input);
+        }
+        
+        void pg_query_free_scan_result_wrapper(PgQueryScanResult result) {
+            pg_query_free_scan_result(result);
+        }
+        EOF
+        fi
+        
+        # Compile wrapper
+        if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+          gcc -shared -fPIC -I. -o "libpgquery_wrapper.so" wrapper.c libpg_query/libpg_query.a
+        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+          gcc -shared -fPIC -I. -o "libpgquery_wrapper.dylib" wrapper.c libpg_query/libpg_query.a
+        elif [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          # Windows builds would need different compilation - skip for now
+          echo "Windows native build not implemented yet"
+        fi
+        
+        # Copy to runtime directories
+        mkdir -p "src/PgQuery.NET/runtimes/$TARGET_RID/native"
+        if [ -f "libpgquery_wrapper.$LIBRARY_EXT" ]; then
+          cp "libpgquery_wrapper.$LIBRARY_EXT" "src/PgQuery.NET/runtimes/$TARGET_RID/native/"
+        fi
 
     - name: Restore dependencies
       run: dotnet restore
