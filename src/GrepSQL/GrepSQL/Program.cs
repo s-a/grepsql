@@ -59,6 +59,9 @@ namespace GrepSQL
 
         [Option("context", HelpText = "Show context lines around matches (requires --highlight)")]
         public int? ContextLines { get; set; }
+
+        [Option("captures-only", HelpText = "Print only captured nodes/values from patterns")]
+        public bool CapturesOnly { get; set; }
     }
 
     public class SqlMatch
@@ -70,6 +73,7 @@ namespace GrepSQL
         public string MatchDetails { get; set; } = "";
         public HashSet<IMessage>? MatchingPath { get; set; }
         public List<IMessage>? MatchingNodes { get; set; }
+        public IReadOnlyDictionary<string, List<IMessage>>? Captures { get; set; }
     }
 
     class Program
@@ -174,6 +178,9 @@ namespace GrepSQL
                     
                     if (success)
                     {
+                        // Collect captures after successful pattern matching
+                        var captures = SqlPatternMatcher.GetCaptures();
+                        
                         // Check if any results are from DoStmt extraction
                         bool hasDoStmtResults = searchResults.Any(r => r.GetType().Name == "DoStmtWrapper");
                         
@@ -207,7 +214,8 @@ namespace GrepSQL
                                             LineNumber = sqlStatements[i].LineNumber,
                                             MatchDetails = details,
                                             MatchingPath = matchingPath,
-                                            MatchingNodes = matchingNodes
+                                            MatchingNodes = matchingNodes,
+                                            Captures = captures
                                         });
                                     }
                                 }
@@ -228,7 +236,8 @@ namespace GrepSQL
                                         LineNumber = sqlStatements[i].LineNumber,
                                         MatchDetails = details,
                                         MatchingPath = matchingPath,
-                                        MatchingNodes = matchingNodes
+                                        MatchingNodes = matchingNodes,
+                                        Captures = captures
                                     });
                                 }
                             }
@@ -250,7 +259,8 @@ namespace GrepSQL
                                 LineNumber = sqlStatements[i].LineNumber,
                                 MatchDetails = details,
                                 MatchingPath = matchingPath,
-                                MatchingNodes = matchingNodes
+                                MatchingNodes = matchingNodes,
+                                Captures = captures
                             });
                         }
                     }
@@ -490,6 +500,63 @@ namespace GrepSQL
                 prefix += $"{match.LineNumber}:";
             }
 
+            // Handle captures-only output
+            if (options.CapturesOnly)
+            {
+                if (match.Captures != null && match.Captures.Count > 0)
+                {
+                    // Check if we only have the default capture group
+                    bool onlyDefaultCaptures = match.Captures.Count == 1 && match.Captures.ContainsKey("default");
+                    
+                    foreach (var captureGroup in match.Captures)
+                    {
+                        var captureName = captureGroup.Key;
+                        var capturedNodes = captureGroup.Value;
+                        
+                        foreach (var capturedNode in capturedNodes)
+                        {
+                            var captureValue = ExtractNodeValue(capturedNode);
+                            if (!string.IsNullOrEmpty(captureValue))
+                            {
+                                if (onlyDefaultCaptures)
+                                {
+                                    // Don't show [default]: prefix when there's only default captures
+                                    Console.WriteLine($"{prefix}{captureValue}");
+                                }
+                                else
+                                {
+                                    // Show capture group name when there are multiple named captures
+                                    Console.WriteLine($"{prefix}[{captureName}]: {captureValue}");
+                                }
+                            }
+                            else
+                            {
+                                // If we can't extract a simple value, show the node type
+                                if (onlyDefaultCaptures)
+                                {
+                                    Console.WriteLine($"{prefix}{capturedNode.Descriptor?.Name ?? "Unknown"}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"{prefix}[{captureName}]: {capturedNode.Descriptor?.Name ?? "Unknown"}");
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // No captures found
+                    Console.WriteLine($"{prefix}[NO CAPTURES]");
+                }
+                
+                if (!options.CountOnly)
+                {
+                    Console.WriteLine(); // Empty line between matches
+                }
+                return;
+            }
+
             if (options.Debug)
             {
                 Console.WriteLine($"{prefix}[DEBUG] Match Details:");
@@ -578,6 +645,160 @@ namespace GrepSQL
                 ShowLineNumbers = options.ShowLineNumbers,
                 ShowMatchInfo = options.Debug || options.Verbose
             };
+        }
+
+        /// <summary>
+        /// Extract a meaningful string value from a captured AST node
+        /// </summary>
+        static string? ExtractNodeValue(IMessage node)
+        {
+            if (node?.Descriptor == null) return null;
+
+            // Handle common node types that contain useful values
+            var nodeTypeName = node.Descriptor.Name;
+
+            switch (nodeTypeName)
+            {
+                case "A_Const":
+                    // Extract constant values (strings, numbers, etc.)
+                    return ExtractConstantValue(node);
+                    
+                case "RangeVar":
+                    // Extract table name from relname field
+                    return ExtractFieldValue(node, "relname");
+                    
+                case "ColumnRef":
+                    // Extract column name (might be in nested structure)
+                    return ExtractColumnName(node);
+                    
+                case "FuncCall":
+                    // Extract function name
+                    return ExtractFunctionName(node);
+                    
+                case "String":
+                    // Extract string value
+                    return ExtractFieldValue(node, "sval");
+                    
+                default:
+                    // For other node types, try to extract common field names
+                    var commonFields = new[] { "sval", "ival", "fval", "bval", "relname", "colname", "funcname", "name" };
+                    foreach (var fieldName in commonFields)
+                    {
+                        var value = ExtractFieldValue(node, fieldName);
+                        if (!string.IsNullOrEmpty(value))
+                            return value;
+                    }
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// Extract constant value from A_Const node
+        /// </summary>
+        static string? ExtractConstantValue(IMessage node)
+        {
+            var descriptor = node.Descriptor;
+            if (descriptor == null) return null;
+
+            // A_Const typically has nested values like String, Integer, Float, etc.
+            foreach (var field in descriptor.Fields.InFieldNumberOrder())
+            {
+                var value = field.Accessor.GetValue(node);
+                if (value is IMessage nestedMessage)
+                {
+                    var nestedValue = ExtractNodeValue(nestedMessage);
+                    if (!string.IsNullOrEmpty(nestedValue))
+                        return nestedValue;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Extract column name from ColumnRef which might have nested fields
+        /// </summary>
+        static string? ExtractColumnName(IMessage node)
+        {
+            // ColumnRef typically has a "fields" array containing String nodes
+            var fieldsValue = ExtractFieldValue(node, "fields");
+            if (!string.IsNullOrEmpty(fieldsValue))
+                return fieldsValue;
+
+            // Try to extract from nested structure
+            var descriptor = node.Descriptor;
+            if (descriptor == null) return null;
+
+            var fieldsField = descriptor.Fields.InFieldNumberOrder()
+                .FirstOrDefault(f => f.Name == "fields");
+                
+            if (fieldsField?.IsRepeated == true)
+            {
+                var fieldsList = fieldsField.Accessor.GetValue(node) as System.Collections.IList;
+                if (fieldsList != null && fieldsList.Count > 0)
+                {
+                    if (fieldsList[0] is IMessage firstField)
+                    {
+                        return ExtractNodeValue(firstField);
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Extract function name from FuncCall node
+        /// </summary>
+        static string? ExtractFunctionName(IMessage node)
+        {
+            // FuncCall typically has a "funcname" field with an array of String nodes
+            var funcNameField = ExtractFieldValue(node, "funcname");
+            if (!string.IsNullOrEmpty(funcNameField))
+                return funcNameField;
+
+            // Try to extract from nested funcname structure
+            var descriptor = node.Descriptor;
+            if (descriptor == null) return null;
+
+            var funcnameField = descriptor.Fields.InFieldNumberOrder()
+                .FirstOrDefault(f => f.Name == "funcname");
+                
+            if (funcnameField?.IsRepeated == true)
+            {
+                var funcnameList = funcnameField.Accessor.GetValue(node) as System.Collections.IList;
+                if (funcnameList != null && funcnameList.Count > 0)
+                {
+                    if (funcnameList[0] is IMessage firstNamePart)
+                    {
+                        return ExtractNodeValue(firstNamePart);
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Extract field value by field name
+        /// </summary>
+        static string? ExtractFieldValue(IMessage node, string fieldName)
+        {
+            if (node?.Descriptor == null) return null;
+
+            var field = node.Descriptor.Fields.InFieldNumberOrder()
+                .FirstOrDefault(f => string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+
+            if (field == null) return null;
+
+            try
+            {
+                var value = field.Accessor.GetValue(node);
+                return value?.ToString();
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

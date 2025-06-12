@@ -61,7 +61,7 @@ namespace PgQuery.NET.Tests
             var result = SqlPatternMatcher.Match("_", "INVALID SQL SYNTAX HERE");
             Assert.False(result); // Should return false, not throw
 
-            var (success, details) = SqlPatternMatcher.MatchWithDetails("_", "INVALID SQL", debug: true);
+            var (success, details) = SqlPatternMatcher.MatchWithDetails("_", "INVALID SQL", debug: false);
             Assert.False(success);
             Assert.Contains("match", details.ToLower());
 
@@ -102,13 +102,13 @@ namespace PgQuery.NET.Tests
             var asts = new[] { ast1, ast2, ast3 };
 
             // Test searching across multiple ASTs
-            var constResults = SqlPatternMatcher.SearchInAsts("A_Const", asts, debug: true);
+            var constResults = SqlPatternMatcher.SearchInAsts("A_Const", asts);
             Assert.True(constResults.Count >= 3, "Should find constants in multiple ASTs");
 
-            var selectResults = SqlPatternMatcher.SearchInAsts("SelectStmt", asts, debug: true);
+            var selectResults = SqlPatternMatcher.SearchInAsts("SelectStmt", asts);
             Assert.True(selectResults.Count >= 2, "Should find SELECT statements in multiple ASTs");
 
-            var insertResults = SqlPatternMatcher.SearchInAsts("InsertStmt", asts, debug: true);
+            var insertResults = SqlPatternMatcher.SearchInAsts("InsertStmt", asts);
             Assert.True(insertResults.Count >= 1, "Should find INSERT statement in multiple ASTs");
 
             _output.WriteLine($"✅ Multi-AST search: {constResults.Count} constants, {selectResults.Count} selects, {insertResults.Count} inserts");
@@ -131,11 +131,11 @@ namespace PgQuery.NET.Tests
             try
             {
                 // Test that DoStmt is detected
-                var doStmtResults = SqlPatternMatcher.Search("DoStmt", doStmtSql, debug: true);
+                var doStmtResults = SqlPatternMatcher.Search("DoStmt", doStmtSql);
                 Assert.True(doStmtResults.Count > 0, "Should find DoStmt");
 
                 // Test that the PL/pgSQL content is processed (this will exercise the new logic)
-                var allResults = SqlPatternMatcher.Search("_", doStmtSql, debug: true);
+                var allResults = SqlPatternMatcher.Search("_", doStmtSql);
                 Assert.True(allResults.Count > 0, "Should find nodes in DoStmt processing");
 
                 _output.WriteLine($"✅ DoStmt processing: found {doStmtResults.Count} DoStmt, {allResults.Count} total nodes");
@@ -356,18 +356,23 @@ namespace PgQuery.NET.Tests
             // Test basic enum matching using Search instead of complex patterns
             Analysis.SqlPatternMatcher.SetDebug(true);
             
-            _output.WriteLine("\n=== Test 1: Basic BoolExpr ===");
-            var boolExprMatches = Analysis.SqlPatternMatcher.Search("BoolExpr", sql);
-            _output.WriteLine($"Found {boolExprMatches.Count} BoolExpr nodes");
-            Assert.True(boolExprMatches.Count > 0, "BoolExpr should be found");
-            
-            // Test that we can find the expressions too
-            _output.WriteLine("\n=== Test 2: A_Expr search ===");
-            var exprMatches = Analysis.SqlPatternMatcher.Search("A_Expr", sql);
-            _output.WriteLine($"Found {exprMatches.Count} A_Expr nodes");
-            Assert.True(exprMatches.Count > 0, "A_Expr nodes should be found");
-            
-            Analysis.SqlPatternMatcher.SetDebug(false);
+            try
+            {
+                _output.WriteLine("\n=== Test 1: Basic BoolExpr ===");
+                var boolExprMatches = Analysis.SqlPatternMatcher.Search("BoolExpr", sql);
+                _output.WriteLine($"Found {boolExprMatches.Count} BoolExpr nodes");
+                Assert.True(boolExprMatches.Count > 0, "BoolExpr should be found");
+                
+                // Test that we can find the expressions too
+                _output.WriteLine("\n=== Test 2: A_Expr search ===");
+                var exprMatches = Analysis.SqlPatternMatcher.Search("A_Expr", sql);
+                _output.WriteLine($"Found {exprMatches.Count} A_Expr nodes");
+                Assert.True(exprMatches.Count > 0, "A_Expr nodes should be found");
+            }
+            finally
+            {
+                Analysis.SqlPatternMatcher.SetDebug(false);
+            }
         }
 
         [Fact]
@@ -415,13 +420,13 @@ namespace PgQuery.NET.Tests
             // Test simple patterns that should work
             _output.WriteLine("Testing basic patterns:");
             
-            var result1 = SqlPatternMatcher.Matches("_", sql, debug: true);
+            var result1 = SqlPatternMatcher.Matches("_", sql);
             _output.WriteLine($"Pattern '_': {result1}");
             
-            var result2 = SqlPatternMatcher.Matches("SelectStmt", sql, debug: true);  
+            var result2 = SqlPatternMatcher.Matches("SelectStmt", sql);  
             _output.WriteLine($"Pattern 'SelectStmt': {result2}");
             
-            var result3 = SqlPatternMatcher.Matches("Node", sql, debug: true);
+            var result3 = SqlPatternMatcher.Matches("Node", sql);
             _output.WriteLine($"Pattern 'Node': {result3}");
             
             // The _ pattern should definitely work
@@ -436,17 +441,17 @@ namespace PgQuery.NET.Tests
             // Test ellipsis patterns with our new implementation
             _output.WriteLine("Testing ellipsis patterns:");
             
-            var result1 = SqlPatternMatcher.Matches("(SelectStmt ... (relname \"users\"))", sql, debug: true);
+            var result1 = SqlPatternMatcher.Matches("(SelectStmt ... (relname \"users\"))", sql);
             _output.WriteLine($"Pattern '(SelectStmt ... (relname \"users\"))': {result1}");
             Assert.True(result1, "Should match SelectStmt with relname pattern");
             
             // Test simple ellipsis
-            var result2 = SqlPatternMatcher.Matches("...", sql, debug: true);
+            var result2 = SqlPatternMatcher.Matches("...", sql);
             _output.WriteLine($"Pattern '...': {result2}");
             Assert.True(result2, "Should match nodes with children");
             
             // Test combined patterns
-            var result3 = SqlPatternMatcher.Matches("(SelectStmt ...)", sql, debug: true);
+            var result3 = SqlPatternMatcher.Matches("(SelectStmt ...)", sql);
             _output.WriteLine($"Pattern '(SelectStmt ...)': {result3}");
             Assert.True(result3, "Should match SelectStmt with children");
         }

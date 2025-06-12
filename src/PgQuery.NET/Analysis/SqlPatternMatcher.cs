@@ -26,6 +26,9 @@ namespace PgQuery.NET.Analysis
         // Performance: Thread-local storage for captures to avoid locking
         private static readonly ThreadLocal<List<IMessage>> _captures = new(() => new List<IMessage>());
         
+        // Named captures storage - maps capture names to captured nodes
+        private static readonly ThreadLocal<Dictionary<string, List<IMessage>>> _namedCaptures = new(() => new Dictionary<string, List<IMessage>>());
+        
         // Debug flag for controlling debug output
         private static bool _debugEnabled = false;
         
@@ -1173,8 +1176,22 @@ namespace PgQuery.NET.Analysis
         /// <returns>Dictionary of captured nodes by name</returns>
         public static IReadOnlyDictionary<string, List<IMessage>> GetCaptures()
         {
-            // For backward compatibility, return empty dictionary since new implementation
-            // doesn't support named captures yet
+            // Return actual named captures if available
+            if (_namedCaptures.Value != null && _namedCaptures.Value.Count > 0)
+            {
+                return _namedCaptures.Value;
+            }
+            
+            // For backward compatibility, if we have unnamed captures, put them under "default" key
+            if (_captures.Value != null && _captures.Value.Count > 0)
+            {
+                return new Dictionary<string, List<IMessage>>
+                {
+                    ["default"] = new List<IMessage>(_captures.Value)
+                };
+            }
+            
+            // Return empty dictionary if no captures
             return new Dictionary<string, List<IMessage>>();
         }
 
@@ -1184,6 +1201,7 @@ namespace PgQuery.NET.Analysis
         public static void ClearCaptures()
         {
             _captures.Value?.Clear();
+            _namedCaptures.Value?.Clear();
         }
 
         /// <summary>
@@ -1192,6 +1210,20 @@ namespace PgQuery.NET.Analysis
         internal static void AddCapture(IMessage node)
         {
             _captures.Value?.Add(node);
+        }
+
+        /// <summary>
+        /// Add named capture for current thread.
+        /// </summary>
+        internal static void AddNamedCapture(string name, IMessage node)
+        {
+            if (_namedCaptures.Value == null) return;
+            
+            if (!_namedCaptures.Value.ContainsKey(name))
+            {
+                _namedCaptures.Value[name] = new List<IMessage>();
+            }
+            _namedCaptures.Value[name].Add(node);
         }
 
         /// <summary>
@@ -1702,7 +1734,7 @@ namespace PgQuery.NET.Analysis
 
             public override bool Match(IMessage node)
             {
-                Console.WriteLine($"[All] Matching All expression with {_expressions.Length} parts against node: {node?.Descriptor?.Name}");
+                DebugLog($"[All] Matching All expression with {_expressions.Length} parts against node: {node?.Descriptor?.Name}");
                 
                 // First try base Find logic for attribute patterns and simple matching
                 if (base.Match(node)) return true;
@@ -1713,19 +1745,19 @@ namespace PgQuery.NET.Analysis
                 {
                     if (_expressions[i] is Until untilExpr)
                     {
-                        Console.WriteLine($"[All] Detected Until expression at index {i}");
+                        DebugLog($"[All] Detected Until expression at index {i}");
                         
                         // If we have expressions before the Until, they must match first
                         for (int j = 0; j < i; j++)
                         {
                             if (!_expressions[j].Match(node))
                             {
-                                Console.WriteLine($"[All] Expression {j} failed to match before Until");
+                                DebugLog($"[All] Expression {j} failed to match before Until");
                                 return false;
                             }
                         }
                         
-                        Console.WriteLine($"[All] All expressions before Until matched, now applying Until");
+                        DebugLog($"[All] All expressions before Until matched, now applying Until");
                         // The Until expression searches in the subtree for its targets
                         return untilExpr.Match(node);
                     }
@@ -1755,14 +1787,26 @@ namespace PgQuery.NET.Analysis
         private class Capture : IExpression
         {
             private readonly IExpression _expression;
+            private readonly string? _captureName;
 
-            public Capture(IExpression expression) => _expression = expression;
+            public Capture(IExpression expression, string? captureName = null)
+            {
+                _expression = expression;
+                _captureName = captureName;
+            }
 
             public bool Match(IMessage node)
             {
                 if (_expression.Match(node))
                 {
-                    AddCapture(node);
+                    if (!string.IsNullOrEmpty(_captureName))
+                    {
+                        AddNamedCapture(_captureName, node);
+                    }
+                    else
+                    {
+                        AddCapture(node);
+                    }
                     return true;
                 }
                 return false;
@@ -1831,32 +1875,32 @@ namespace PgQuery.NET.Analysis
             public Until(IExpression[] expressions) 
             {
                 _expressions = expressions;
-                Console.WriteLine($"[Until] Created Until expression with {expressions.Length} target expressions");
+                DebugLog($"[Until] Created Until expression with {expressions.Length} target expressions");
             }
 
             public Until(IExpression expression) 
             {
                 _expressions = new[] { expression };
-                Console.WriteLine($"[Until] Created Until expression with single target: {expression?.GetType().Name}");
+                DebugLog($"[Until] Created Until expression with single target: {expression?.GetType().Name}");
             }
 
             public bool Match(IMessage node)
             {
-                Console.WriteLine($"[Until] Matching {_expressions.Length} expressions against node: {node?.Descriptor?.Name}");
+                DebugLog($"[Until] Matching {_expressions.Length} expressions against node: {node?.Descriptor?.Name}");
                 
                 // All target expressions must be found somewhere in the subtree
                 foreach (var expr in _expressions)
                 {
                     var result = SearchInSubtree(node, expr);
-                    Console.WriteLine($"[Until] Expression {expr.GetType().Name} search result: {result}");
+                    DebugLog($"[Until] Expression {expr.GetType().Name} search result: {result}");
                     if (!result)
                     {
-                        Console.WriteLine($"[Until] Failed to find expression {expr.GetType().Name} in subtree");
+                        DebugLog($"[Until] Failed to find expression {expr.GetType().Name} in subtree");
                         return false;
                     }
                 }
                 
-                Console.WriteLine($"[Until] All expressions found in subtree");
+                DebugLog($"[Until] All expressions found in subtree");
                 return true;
             }
 
@@ -1864,30 +1908,30 @@ namespace PgQuery.NET.Analysis
             {
                 if (node == null) 
                 {
-                    Console.WriteLine($"[Until] Node is null, returning false");
+                    DebugLog($"[Until] Node is null, returning false");
                     return false;
                 }
 
-                Console.WriteLine($"[Until] Checking node: {node.Descriptor?.Name}");
+                DebugLog($"[Until] Checking node: {node.Descriptor?.Name}");
                 
                 // First check if the target expression matches the current node
                 if (targetExpression.Match(node)) 
                 {
-                    Console.WriteLine($"[Until] Target expression matched current node!");
+                    DebugLog($"[Until] Target expression matched current node!");
                     return true;
                 }
 
                 var descriptor = node.Descriptor;
                 if (descriptor == null) 
                 {
-                    Console.WriteLine($"[Until] Node descriptor is null");
+                    DebugLog($"[Until] Node descriptor is null");
                     return false;
                 }
 
                 // Recursively search all children - improved traversal
                 foreach (var field in descriptor.Fields.InFieldNumberOrder())
                 {
-                    Console.WriteLine($"[Until] Checking field: {field.Name} (repeated: {field.IsRepeated})");
+                    DebugLog($"[Until] Checking field: {field.Name} (repeated: {field.IsRepeated})");
                     
                     try
                     {
@@ -1898,24 +1942,24 @@ namespace PgQuery.NET.Analysis
                             var list = (System.Collections.IList?)fieldValue;
                             if (list != null)
                             {
-                                Console.WriteLine($"[Until] Field {field.Name} has {list.Count} items");
+                                DebugLog($"[Until] Field {field.Name} has {list.Count} items");
                                 foreach (var item in list)
                                 {
                                     if (item is IMessage child)
                                     {
                                         if (SearchInSubtree(child, targetExpression))
                                         {
-                                            Console.WriteLine($"[Until] Found match in repeated field {field.Name}");
+                                            DebugLog($"[Until] Found match in repeated field {field.Name}");
                                             return true;
                                         }
                                     }
                                     else if (item != null)
                                     {
-                                        Console.WriteLine($"[Until] Non-message item in {field.Name}: {item} ({item.GetType().Name})");
+                                        DebugLog($"[Until] Non-message item in {field.Name}: {item} ({item.GetType().Name})");
                                         // For attribute patterns, also check non-message values
                                         if (targetExpression is Find findExpr && findExpr.MatchesDirectValue(item))
                                         {
-                                            Console.WriteLine($"[Until] Direct value match found!");
+                                            DebugLog($"[Until] Direct value match found!");
                                             return true;
                                         }
                                     }
@@ -1928,17 +1972,17 @@ namespace PgQuery.NET.Analysis
                             {
                                 if (SearchInSubtree(child, targetExpression))
                                 {
-                                    Console.WriteLine($"[Until] Found match in field {field.Name}");
+                                    DebugLog($"[Until] Found match in field {field.Name}");
                                     return true;
                                 }
                             }
                             else if (fieldValue != null)
                             {
-                                Console.WriteLine($"[Until] Non-message field {field.Name}: {fieldValue} ({fieldValue.GetType().Name})");
+                                DebugLog($"[Until] Non-message field {field.Name}: {fieldValue} ({fieldValue.GetType().Name})");
                                 // For attribute patterns, also check non-message values
                                 if (targetExpression is Find findExpr && findExpr.MatchesDirectValue(fieldValue))
                                 {
-                                    Console.WriteLine($"[Until] Direct value match found in field {field.Name}!");
+                                    DebugLog($"[Until] Direct value match found in field {field.Name}!");
                                     return true;
                                 }
                             }
@@ -1946,12 +1990,12 @@ namespace PgQuery.NET.Analysis
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[Until] Error accessing field {field.Name}: {ex.Message}");
+                        DebugLog($"[Until] Error accessing field {field.Name}: {ex.Message}");
                         // Continue with other fields
                     }
                 }
                 
-                Console.WriteLine($"[Until] No match found in subtree of {node.Descriptor?.Name}");
+                DebugLog($"[Until] No match found in subtree of {node.Descriptor?.Name}");
                 return false;
             }
         }
@@ -1985,7 +2029,7 @@ namespace PgQuery.NET.Analysis
                     "(" => new All(ParseUntil(")")),
                     "[" => new All(ParseUntil("]")),
                     "{" => new Any(ParseUntil("}")),
-                    "$" => new Capture(Parse()),
+                    "$" => ParseCapture(),
                     "!" => new Not(Parse()),
                     "?" => new Maybe(Parse()),
                     "^" => new Parent(Parse()),
@@ -1997,6 +2041,44 @@ namespace PgQuery.NET.Analysis
                 
                 DebugLog($"[Parser] Created expression: {result.GetType().Name}");
                 return result;
+            }
+
+            private IExpression ParseCapture()
+            {
+                // Handle different capture patterns:
+                // $() -> capture full node
+                // $exp -> capture the result of expression exp
+                // In patterns like ($exp $...) each $ captures independently
+                
+                if (_tokens.Count > 0 && _tokens.Peek() == "(")
+                {
+                    _tokens.Dequeue(); // consume the "("
+                    if (_tokens.Count > 0 && _tokens.Peek() == ")")
+                    {
+                        _tokens.Dequeue(); // consume the ")"
+                        // $() - capture full node
+                        return new Capture(LITERALS["_"]);
+                    }
+                    else
+                    {
+                        // $(...) - capture the result of the expressions inside parentheses
+                        var innerExpressions = ParseUntil(")");
+                        if (innerExpressions.Length == 1)
+                        {
+                            return new Capture(innerExpressions[0]);
+                        }
+                        else
+                        {
+                            return new Capture(new All(innerExpressions));
+                        }
+                    }
+                }
+                else
+                {
+                    // $exp - capture the result of the next expression
+                    var nextExpression = Parse();
+                    return new Capture(nextExpression);
+                }
             }
 
             private IExpression[] ParseUntil(string endToken)
