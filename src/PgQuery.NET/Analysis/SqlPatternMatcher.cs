@@ -26,6 +26,15 @@ namespace PgQuery.NET.Analysis
         // Performance: Thread-local storage for captures to avoid locking
         private static readonly ThreadLocal<List<IMessage>> _captures = new(() => new List<IMessage>());
         
+        // Debug flag for controlling debug output
+        private static bool _debugEnabled = false;
+        
+        // Debug helper method
+        private static void DebugLog(string message)
+        {
+            if (_debugEnabled) Console.WriteLine(message);
+        }
+        
         // Performance: Reusable string arrays for common patterns
         private static readonly string[] _commonWildcards = { "_", "...", "nil" };
         
@@ -70,8 +79,8 @@ namespace PgQuery.NET.Analysis
         private static readonly Dictionary<string, IExpression> LITERALS = new Dictionary<string, IExpression>
         {
             ["_"] = new Find("_"),      // Match any node
-            ["..."] = new Find("..."), // Match any node with children
-            ["nil"] = new Find("nil")   // Match null/empty nodes
+            ["nil"] = new Find("nil"),  // Match null/empty nodes
+            ["..."] = new Find("...")   // Match nodes with children
         };
 
         /// <summary>
@@ -85,13 +94,9 @@ namespace PgQuery.NET.Analysis
         {
             try
             {
-                ClearCaptures();
-                
-                // Performance: Use cached expression if available
-                var expression = GetCachedExpression(pattern);
-                var ast = PgQuery.Parse(sql);
-                
-                return expression.Match(ast.ParseTree.Stmts[0].Stmt);
+                // Simply use the Search method and check if any results are found
+                var results = Search(pattern, sql);
+                return results.Count > 0;
             }
             catch (Exception ex)
             {
@@ -111,6 +116,8 @@ namespace PgQuery.NET.Analysis
         {
             try
             {
+                _debugEnabled = debug;
+                
                 if (debug)
                 {
                     Console.WriteLine($"[SqlPatternMatcher] Searching for pattern: {pattern}");
@@ -122,20 +129,8 @@ namespace PgQuery.NET.Analysis
                 var ast = PgQuery.Parse(sql);
                 var results = new List<IMessage>();
                 
-                // For simple wildcard patterns like "_", only check the root node
-                if (pattern == "_" || pattern == "..." || pattern == "nil")
-                {
-                    var rootNode = ast.ParseTree.Stmts[0].Stmt;
-                    if (expression.Match(rootNode))
-                    {
-                        results.Add(rootNode);
-                    }
-                }
-                else
-                {
-                    // For specific node types or complex patterns, search recursively
-                    SearchRecursive(expression, ast.ParseTree.Stmts[0].Stmt, results);
-                }
+                // Search across all statements in the parse tree
+                SearchInAsts(expression, new[] { ast }, results);
                 
                 if (debug)
                 {
@@ -154,6 +149,502 @@ namespace PgQuery.NET.Analysis
                 Console.WriteLine($"[SqlPatternMatcher] {errorMessage}");
                 return new List<IMessage>();
             }
+        }
+
+        /// <summary>
+        /// Search for all nodes matching a pattern across multiple ASTs.
+        /// </summary>
+        /// <param name="pattern">Pattern to search for</param>
+        /// <param name="asts">List of ASTs to search</param>
+        /// <param name="debug">Enable debug output</param>
+        /// <returns>List of matching nodes</returns>
+        public static List<IMessage> SearchInAsts(string pattern, IEnumerable<ParseResult> asts, bool debug = false)
+        {
+            try
+            {
+                _debugEnabled = debug;
+                
+                if (debug)
+                {
+                    Console.WriteLine($"[SqlPatternMatcher] Searching for pattern: {pattern} across multiple ASTs");
+                }
+                
+                ClearCaptures();
+                
+                var expression = GetCachedExpression(pattern);
+                var results = new List<IMessage>();
+                
+                SearchInAsts(expression, asts, results);
+                
+                if (debug)
+                {
+                    Console.WriteLine($"[SqlPatternMatcher] Found {results.Count} matches across all ASTs");
+                }
+                
+                return results;
+            }
+            catch (Exception ex)
+            {
+                var errorMessage = $"Search across ASTs failed: {ex.Message}";
+                if (debug)
+                {
+                    Console.WriteLine($"[SqlPatternMatcher] {errorMessage}");
+                }
+                Console.WriteLine($"[SqlPatternMatcher] {errorMessage}");
+                return new List<IMessage>();
+            }
+        }
+
+        /// <summary>
+        /// Core search method that works across multiple ASTs.
+        /// </summary>
+        private static void SearchInAsts(IExpression expression, IEnumerable<ParseResult> asts, List<IMessage> results)
+        {
+            foreach (var ast in asts)
+            {
+                if (ast?.ParseTree?.Stmts == null) continue;
+
+                foreach (var stmt in ast.ParseTree.Stmts)
+                {
+                    if (stmt.Stmt == null) continue;
+
+                    // For simple wildcard patterns like "_", only check the root node
+                    if (expression is Find find && find.IsWildcard())
+                    {
+                        if (expression.Match(stmt.Stmt))
+                        {
+                            results.Add(stmt.Stmt);
+                        }
+                    }
+                    else if (expression is Find findNil && findNil.IsNil())
+                    {
+                        // nil should not match anything in a valid parse tree
+                        continue;
+                    }
+                    else if (expression is Find findEllipsis && findEllipsis.IsEllipsis())
+                    {
+                        // For ellipsis patterns, check if the root node has children
+                        if (expression.Match(stmt.Stmt))
+                        {
+                            results.Add(stmt.Stmt);
+                        }
+                    }
+                    else
+                    {
+                        // For all other patterns, search recursively
+                        SearchRecursive(expression, stmt.Stmt, results);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Recursive search with performance optimizations and enhanced DoStmt handling.
+        /// </summary>
+        private static void SearchRecursive(IExpression expression, IMessage node, List<IMessage> results)
+        {
+            if (node == null) return;
+
+            // Check if current node matches
+            if (expression.Match(node))
+            {
+                results.Add(node);
+            }
+
+            // Enhanced DoStmt handling - detect and parse PL/pgSQL content
+            if (node.Descriptor?.Name == "DoStmt")
+            {
+                DebugLog($"[DoStmt] Found DoStmt node, processing PL/pgSQL content");
+                var plpgsqlContent = ExtractSqlFromDoStmt(node);
+                
+                if (!string.IsNullOrEmpty(plpgsqlContent))
+                {
+                    try
+                    {
+                        DebugLog($"[DoStmt] Extracted PL/pgSQL content: {plpgsqlContent}");
+                        
+                        // First try to extract SQL statements manually from the PL/pgSQL block
+                        var extractedSqlStatements = ExtractSqlStatementsFromPlPgSqlBlock(plpgsqlContent);
+                        
+                        if (extractedSqlStatements.Count > 0)
+                        {
+                            DebugLog($"[DoStmt] Found {extractedSqlStatements.Count} SQL statements via manual extraction");
+                            var embeddedAsts = new List<ParseResult>();
+                            
+                            foreach (var sqlStatement in extractedSqlStatements)
+                            {
+                                if (!string.IsNullOrEmpty(sqlStatement))
+                                {
+                                    try
+                                    {
+                                        DebugLog($"[DoStmt] Parsing SQL: {sqlStatement.Substring(0, Math.Min(50, sqlStatement.Length))}...");
+                                        var embeddedAst = ParseSql(sqlStatement);
+                                        if (embeddedAst != null)
+                                        {
+                                            embeddedAsts.Add(embeddedAst);
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        DebugLog($"[DoStmt] Failed to parse extracted SQL: {ex.Message}");
+                                    }
+                                }
+                            }
+                            
+                            // Search within embedded SQL ASTs
+                            if (embeddedAsts.Count > 0)
+                            {
+                                var embeddedResults = new List<IMessage>();
+                                SearchInAsts(expression, embeddedAsts, embeddedResults);
+                                
+                                // Wrap results to indicate they came from DoStmt
+                                foreach (var result in embeddedResults)
+                                {
+                                    results.Add(new DoStmtWrapper(result, plpgsqlContent));
+                                }
+                            }
+                        }
+                        
+                        // Also try structured PL/pgSQL parsing if available
+                        try
+                        {
+                            var plpgsqlJson = PgQuery.ParsePlpgsql(plpgsqlContent);
+                            DebugLog($"[DoStmt] PL/pgSQL structured parsing succeeded");
+                            
+                            // Create a PL/pgSQL AST wrapper that can be searched
+                            var plpgsqlWrapper = new PlPgSqlWrapper(plpgsqlJson, plpgsqlContent);
+                            
+                            // Search within the PL/pgSQL content
+                            SearchInPlPgSql(expression, plpgsqlWrapper, results);
+                            
+                            // Also extract and parse any additional embedded SQL statements from JSON
+                            var jsonSqlStatements = ExtractSqlFromPlpgsqlJson(plpgsqlJson);
+                            
+                            if (jsonSqlStatements.Count > 0)
+                            {
+                                DebugLog($"[DoStmt] Found {jsonSqlStatements.Count} additional SQL statements from JSON");
+                                var additionalAsts = new List<ParseResult>();
+                                
+                                foreach (var sqlStatement in jsonSqlStatements)
+                                {
+                                    if (!string.IsNullOrEmpty(sqlStatement))
+                                    {
+                                        try
+                                        {
+                                            var embeddedAst = ParseSql(sqlStatement);
+                                            if (embeddedAst != null)
+                                            {
+                                                additionalAsts.Add(embeddedAst);
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            DebugLog($"[DoStmt] Failed to parse JSON-extracted SQL: {ex.Message}");
+                                        }
+                                    }
+                                }
+                                
+                                // Search within additional embedded SQL ASTs
+                                if (additionalAsts.Count > 0)
+                                {
+                                    var additionalResults = new List<IMessage>();
+                                    SearchInAsts(expression, additionalAsts, additionalResults);
+                                    
+                                    // Wrap results to indicate they came from DoStmt
+                                    foreach (var result in additionalResults)
+                                    {
+                                        results.Add(new DoStmtWrapper(result, plpgsqlContent));
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            DebugLog($"[DoStmt] PL/pgSQL structured parsing failed (using manual extraction): {ex.Message}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"[DoStmt] PL/pgSQL processing failed: {ex.Message}");
+                    }
+                }
+            }
+
+            // Performance: Use descriptor to efficiently iterate children
+            var descriptor = node.Descriptor;
+            if (descriptor != null)
+            {
+                foreach (var field in descriptor.Fields.InFieldNumberOrder())
+                {
+                    if (field.IsRepeated)
+                    {
+                        var list = (System.Collections.IList)field.Accessor.GetValue(node);
+                        if (list != null)
+                        {
+                            foreach (var item in list)
+                            {
+                                if (item is IMessage child)
+                                {
+                                    SearchRecursive(expression, child, results);
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var value = field.Accessor.GetValue(node);
+                        if (value is IMessage child)
+                        {
+                            SearchRecursive(expression, child, results);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Extract SQL statements from PL/pgSQL block using pattern matching.
+        /// </summary>
+        private static List<string> ExtractSqlStatementsFromPlPgSqlBlock(string plpgsqlContent)
+        {
+            var sqlStatements = new List<string>();
+            
+            if (string.IsNullOrEmpty(plpgsqlContent))
+                return sqlStatements;
+            
+            DebugLog($"[ExtractSqlStatementsFromPlPgSqlBlock] Processing content");
+            
+            // Remove the outer BEGIN/END block and clean up
+            var content = plpgsqlContent.Trim();
+            
+            // Remove BEGIN and END keywords if present
+            if (content.StartsWith("BEGIN", StringComparison.OrdinalIgnoreCase))
+            {
+                content = content.Substring(5).Trim();
+            }
+            if (content.EndsWith("END", StringComparison.OrdinalIgnoreCase))
+            {
+                content = content.Substring(0, content.Length - 3).Trim();
+            }
+            
+            // Split by semicolons and extract SQL statements
+            var lines = content.Split('\n');
+            var currentStatement = new System.Text.StringBuilder();
+            bool inStatement = false;
+            
+            foreach (var line in lines)
+            {
+                var trimmedLine = line.Trim();
+                
+                // Skip empty lines and comments
+                if (string.IsNullOrEmpty(trimmedLine) || trimmedLine.StartsWith("--"))
+                    continue;
+                
+                // Skip PL/pgSQL specific statements
+                if (trimmedLine.StartsWith("RAISE ", StringComparison.OrdinalIgnoreCase) ||
+                    trimmedLine.StartsWith("DECLARE", StringComparison.OrdinalIgnoreCase) ||
+                    trimmedLine.StartsWith("EXCEPTION", StringComparison.OrdinalIgnoreCase))
+                {
+                    // If we're in a statement, end it before skipping
+                    if (inStatement && currentStatement.Length > 0)
+                    {
+                        var stmt = currentStatement.ToString().Trim();
+                        if (IsParsableSqlStatement(stmt))
+                        {
+                            sqlStatements.Add(stmt);
+                            DebugLog($"[ExtractSqlStatementsFromPlPgSqlBlock] Found SQL: {stmt.Substring(0, Math.Min(50, stmt.Length))}...");
+                        }
+                        currentStatement.Clear();
+                        inStatement = false;
+                    }
+                    continue;
+                }
+                
+                // Check if this line starts a SQL statement
+                if (IsStartOfSqlStatement(trimmedLine))
+                {
+                    // If we were already building a statement, save it first
+                    if (inStatement && currentStatement.Length > 0)
+                    {
+                        var stmt = currentStatement.ToString().Trim();
+                        if (IsParsableSqlStatement(stmt))
+                        {
+                            sqlStatements.Add(stmt);
+                            DebugLog($"[ExtractSqlStatementsFromPlPgSqlBlock] Found SQL: {stmt.Substring(0, Math.Min(50, stmt.Length))}...");
+                        }
+                        currentStatement.Clear();
+                    }
+                    
+                    currentStatement.AppendLine(line);
+                    inStatement = true;
+                }
+                else if (inStatement)
+                {
+                    currentStatement.AppendLine(line);
+                }
+                
+                // Check if this line ends a statement
+                if (inStatement && trimmedLine.EndsWith(";"))
+                {
+                    var stmt = currentStatement.ToString().Trim();
+                    if (IsParsableSqlStatement(stmt))
+                    {
+                        sqlStatements.Add(stmt);
+                        DebugLog($"[ExtractSqlStatementsFromPlPgSqlBlock] Found SQL: {stmt.Substring(0, Math.Min(50, stmt.Length))}...");
+                    }
+                    currentStatement.Clear();
+                    inStatement = false;
+                }
+            }
+            
+            // Handle any remaining statement
+            if (inStatement && currentStatement.Length > 0)
+            {
+                var stmt = currentStatement.ToString().Trim();
+                if (IsParsableSqlStatement(stmt))
+                {
+                    sqlStatements.Add(stmt);
+                    DebugLog($"[ExtractSqlStatementsFromPlPgSqlBlock] Found final SQL: {stmt.Substring(0, Math.Min(50, stmt.Length))}...");
+                }
+            }
+            
+            DebugLog($"[ExtractSqlStatementsFromPlPgSqlBlock] Extracted {sqlStatements.Count} SQL statements");
+            return sqlStatements;
+        }
+
+        /// <summary>
+        /// Check if a line starts a SQL statement.
+        /// </summary>
+        private static bool IsStartOfSqlStatement(string line)
+        {
+            if (string.IsNullOrEmpty(line)) return false;
+            
+            var upperLine = line.ToUpperInvariant();
+            return upperLine.StartsWith("SELECT ") ||
+                   upperLine.StartsWith("INSERT ") ||
+                   upperLine.StartsWith("UPDATE ") ||
+                   upperLine.StartsWith("DELETE ") ||
+                   upperLine.StartsWith("CREATE ") ||
+                   upperLine.StartsWith("DROP ") ||
+                   upperLine.StartsWith("ALTER ") ||
+                   upperLine.StartsWith("WITH ") ||
+                   upperLine.StartsWith("TRUNCATE ") ||
+                   upperLine.StartsWith("GRANT ") ||
+                   upperLine.StartsWith("REVOKE ");
+        }
+
+        /// <summary>
+        /// Check if a statement is a parsable SQL statement.
+        /// </summary>
+        private static bool IsParsableSqlStatement(string statement)
+        {
+            if (string.IsNullOrWhiteSpace(statement)) return false;
+            
+            var upperStatement = statement.Trim().ToUpperInvariant();
+            
+            // Must start with a SQL keyword
+            if (!IsStartOfSqlStatement(upperStatement)) return false;
+            
+            // Must not be a PL/pgSQL specific statement
+            if (upperStatement.Contains("RAISE NOTICE") ||
+                upperStatement.Contains("DECLARE ") ||
+                upperStatement.Contains("EXCEPTION"))
+                return false;
+            
+            // Should have reasonable length
+            if (statement.Length < 10) return false;
+            
+            return true;
+        }
+
+        /// <summary>
+        /// Wrapper for PL/pgSQL JSON nodes to make them searchable.
+        /// </summary>
+        public class PlPgSqlJsonNode : IMessage
+        {
+            public System.Text.Json.JsonElement JsonElement { get; }
+            private readonly Google.Protobuf.Reflection.MessageDescriptor _descriptor;
+            
+            public PlPgSqlJsonNode(System.Text.Json.JsonElement jsonElement)
+            {
+                JsonElement = jsonElement;
+                _descriptor = CreatePlPgSqlJsonDescriptor();
+            }
+            
+            public Google.Protobuf.Reflection.MessageDescriptor Descriptor => _descriptor;
+            public int CalculateSize() => JsonElement.ToString().Length;
+            public void MergeFrom(Google.Protobuf.CodedInputStream input) { }
+            public void WriteTo(Google.Protobuf.CodedOutputStream output) { }
+            public IMessage Clone() => new PlPgSqlJsonNode(JsonElement);
+            public bool Equals(IMessage other) => other is PlPgSqlJsonNode node && node.JsonElement.Equals(JsonElement);
+            
+            private static Google.Protobuf.Reflection.MessageDescriptor CreatePlPgSqlJsonDescriptor()
+            {
+                // Create a descriptor that represents a PL/pgSQL JSON node
+                return Google.Protobuf.WellKnownTypes.Struct.Descriptor;
+            }
+        }
+
+        /// <summary>
+        /// Wrapper for PL/pgSQL content to make it searchable.
+        /// </summary>
+        public class PlPgSqlWrapper : IMessage
+        {
+            public string PlPgSqlJson { get; }
+            public string PlPgSqlContent { get; }
+            private readonly Google.Protobuf.Reflection.MessageDescriptor _descriptor;
+            
+            public PlPgSqlWrapper(string plpgsqlJson, string plpgsqlContent)
+            {
+                PlPgSqlJson = plpgsqlJson;
+                PlPgSqlContent = plpgsqlContent;
+                
+                // Create a fake descriptor for this wrapper
+                _descriptor = CreatePlPgSqlDescriptor();
+            }
+            
+            public Google.Protobuf.Reflection.MessageDescriptor Descriptor => _descriptor;
+            public int CalculateSize() => PlPgSqlContent.Length;
+            public void MergeFrom(Google.Protobuf.CodedInputStream input) { }
+            public void WriteTo(Google.Protobuf.CodedOutputStream output) { }
+            public IMessage Clone() => new PlPgSqlWrapper(PlPgSqlJson, PlPgSqlContent);
+            public bool Equals(IMessage other) => other is PlPgSqlWrapper wrapper && wrapper.PlPgSqlContent == PlPgSqlContent;
+            
+            private static Google.Protobuf.Reflection.MessageDescriptor CreatePlPgSqlDescriptor()
+            {
+                // Create a descriptor that represents a PL/pgSQL block
+                return Google.Protobuf.WellKnownTypes.Any.Descriptor;
+            }
+
+            /// <summary>
+            /// Get the node type name for pattern matching.
+            /// </summary>
+            public string GetNodeTypeName()
+            {
+                return "PlPgSqlBlock";
+            }
+        }
+
+        /// <summary>
+        /// Wrapper class to track nodes that came from inside DoStmt parsing
+        /// </summary>
+        public class DoStmtWrapper : IMessage
+        {
+            public IMessage InnerNode { get; }
+            public string ExtractedSql { get; }
+            
+            public DoStmtWrapper(IMessage innerNode, string extractedSql)
+            {
+                InnerNode = innerNode;
+                ExtractedSql = extractedSql;
+            }
+            
+            public Google.Protobuf.Reflection.MessageDescriptor Descriptor => InnerNode.Descriptor;
+            public int CalculateSize() => InnerNode.CalculateSize();
+            public void MergeFrom(Google.Protobuf.CodedInputStream input) => InnerNode.MergeFrom(input);
+            public void WriteTo(Google.Protobuf.CodedOutputStream output) => InnerNode.WriteTo(output);
+            public IMessage Clone() => new DoStmtWrapper(InnerNode, ExtractedSql);
+            public bool Equals(IMessage other) => InnerNode.Equals(other);
         }
 
         /// <summary>
@@ -282,25 +773,30 @@ namespace PgQuery.NET.Analysis
         }
 
         /// <summary>
-        /// Compile pattern into optimized expression tree.
+        /// Performance optimized expression compilation with smart caching.
         /// </summary>
         private static IExpression CompileExpression(string pattern)
         {
-            // Performance: Handle common literals directly
-            if (LITERALS.TryGetValue(pattern, out var literal))
+            // Performance optimization for empty/null patterns
+            if (string.IsNullOrWhiteSpace(pattern)) return LITERALS["_"];
+            
+            // Performance optimization for simple literal patterns
+            if (IsSimplePattern(pattern) && _commonWildcards.Contains(pattern))
             {
-                return literal;
+                return LITERALS.GetValueOrDefault(pattern, new Find(pattern));
+            }
+            
+            // Check if this is a complex pattern that needs parsing
+            if (pattern.Contains("...") || pattern.Contains("$") || pattern.Contains("!") || 
+                pattern.Contains("?") || pattern.Contains("^") || pattern.Contains("[") || 
+                pattern.Contains("{"))
+            {
+                return new ExpressionParser(pattern).Parse();
             }
 
-            // Check for s-expression attribute pattern BEFORE complex parsing
-            // because ExpressionParser doesn't handle s-expressions
+            // Check for s-expression attribute pattern AFTER checking for complex patterns
+            // Simple parentheses patterns like (relname "users") are handled as Find expressions
             if (pattern.StartsWith("(") && pattern.EndsWith(")"))
-            {
-                return new Find(pattern);
-            }
-
-            // Performance: Fast path for simple patterns
-            if (IsSimplePattern(pattern))
             {
                 return new Find(pattern);
             }
@@ -320,48 +816,241 @@ namespace PgQuery.NET.Analysis
         }
 
         /// <summary>
-        /// Recursive search with performance optimizations.
+        /// Extract SQL content from a DoStmt node's dollar-quoted string.
         /// </summary>
-        private static void SearchRecursive(IExpression expression, IMessage node, List<IMessage> results)
+        private static string? ExtractSqlFromDoStmt(IMessage doStmtNode)
         {
-            if (node == null) return;
-
-            // Check if current node matches
-            if (expression.Match(node))
+            try
             {
-                results.Add(node);
-            }
-
-            // Performance: Use descriptor to efficiently iterate children
-            var descriptor = node.Descriptor;
-            if (descriptor != null)
-            {
-                foreach (var field in descriptor.Fields.InFieldNumberOrder())
+                DebugLog($"[ExtractSqlFromDoStmt] Starting extraction from DoStmt");
+                // Use reflection to access the Args field and look for the "as" argument
+                var argsField = FindField(doStmtNode.Descriptor, "args");
+                if (argsField != null)
                 {
-                    if (field.IsRepeated)
+                    DebugLog($"[ExtractSqlFromDoStmt] Found args field");
+                    var args = (System.Collections.IList?)argsField.Accessor.GetValue(doStmtNode);
+                    if (args != null)
                     {
-                        var list = (System.Collections.IList)field.Accessor.GetValue(node);
-                        if (list != null)
+                        DebugLog($"[ExtractSqlFromDoStmt] Found {args.Count} args");
+                        foreach (var arg in args)
                         {
-                            foreach (var item in list)
+                            if (arg is IMessage argMessage)
                             {
-                                if (item is IMessage child)
+                                DebugLog($"[ExtractSqlFromDoStmt] Processing arg: {argMessage.Descriptor?.Name}");
+                                var defElemField = FindField(argMessage.Descriptor, "def_elem");
+                                if (defElemField != null)
                                 {
-                                    SearchRecursive(expression, child, results);
+                                    DebugLog($"[ExtractSqlFromDoStmt] Found def_elem field");
+                                    var defElem = defElemField.Accessor.GetValue(argMessage) as IMessage;
+                                    if (defElem != null && IsDefElemWithName(defElem, "as"))
+                                    {
+                                        DebugLog($"[ExtractSqlFromDoStmt] Found 'as' DefElem");
+                                        var sval = GetStringValueFromDefElem(defElem);
+                                        if (!string.IsNullOrEmpty(sval))
+                                        {
+                                            DebugLog($"[ExtractSqlFromDoStmt] Extracted sval: {sval}");
+                                            // Return the raw PL/pgSQL content for proper parsing
+                                            return sval;
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                     else
                     {
-                        var value = field.Accessor.GetValue(node);
-                        if (value is IMessage child)
+                        DebugLog($"[ExtractSqlFromDoStmt] args is null");
+                    }
+                }
+                else
+                {
+                    DebugLog($"[ExtractSqlFromDoStmt] args field not found");
+                }
+            }
+            catch (Exception)
+            {
+                // If extraction fails, return null
+            }
+            
+            return null;
+        }
+
+        /// <summary>
+        /// Find a field by name in a message descriptor.
+        /// </summary>
+        private static Google.Protobuf.Reflection.FieldDescriptor? FindField(Google.Protobuf.Reflection.MessageDescriptor? descriptor, string fieldName)
+        {
+            if (descriptor?.Fields == null) return null;
+            
+            foreach (var field in descriptor.Fields.InFieldNumberOrder())
+            {
+                if (field.Name == fieldName)
+                {
+                    return field;
+                }
+            }
+            
+            return null;
+        }
+
+        /// <summary>
+        /// Check if a DefElem has the specified name.
+        /// </summary>
+        private static bool IsDefElemWithName(IMessage defElem, string expectedName)
+        {
+            try
+            {
+                var defnameField = FindField(defElem.Descriptor, "defname");
+                if (defnameField != null)
+                {
+                    var defname = defnameField.Accessor.GetValue(defElem) as string;
+                    return defname == expectedName;
+                }
+            }
+            catch (Exception)
+            {
+                // If access fails, return false
+            }
+            
+            return false;
+        }
+
+        /// <summary>
+        /// Get the string value from a DefElem's arg field.
+        /// </summary>
+        private static string? GetStringValueFromDefElem(IMessage defElem)
+        {
+            try
+            {
+                var argField = FindField(defElem.Descriptor, "arg");
+                if (argField != null)
+                {
+                    var arg = argField.Accessor.GetValue(defElem) as IMessage;
+                    if (arg != null)
+                    {
+                        var stringField = FindField(arg.Descriptor, "string");
+                        if (stringField != null)
                         {
-                            SearchRecursive(expression, child, results);
+                            var stringValue = stringField.Accessor.GetValue(arg) as IMessage;
+                            if (stringValue != null)
+                            {
+                                var svalField = FindField(stringValue.Descriptor, "sval");
+                                if (svalField != null)
+                                {
+                                    return svalField.Accessor.GetValue(stringValue) as string;
+                                }
+                            }
                         }
                     }
                 }
             }
+            catch (Exception)
+            {
+                // If access fails, return null
+            }
+            
+            return null;
+        }
+
+        /// <summary>
+        /// Extract SQL statements from PL/pgSQL JSON result using structured parsing.
+        /// </summary>
+        private static List<string> ExtractSqlFromPlpgsqlJson(string plpgsqlJson)
+        {
+            var sqlStatements = new List<string>();
+            
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(plpgsqlJson);
+                
+                // Navigate the PL/pgSQL AST structure to find SQL statements
+                ExtractSqlFromJsonElement(doc.RootElement, sqlStatements);
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"[ExtractSqlFromPlpgsqlJson] Failed to parse JSON: {ex.Message}");
+            }
+            
+            return sqlStatements;
+        }
+
+        /// <summary>
+        /// Recursively extract SQL statements from PL/pgSQL JSON elements.
+        /// </summary>
+        private static void ExtractSqlFromJsonElement(System.Text.Json.JsonElement element, List<string> sqlStatements)
+        {
+            switch (element.ValueKind)
+            {
+                case System.Text.Json.JsonValueKind.Object:
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        // Look for SQL statement nodes in the PL/pgSQL AST
+                        if (IsSqlStatementProperty(property.Name))
+                        {
+                            var sqlText = ExtractSqlTextFromProperty(property.Value);
+                            if (!string.IsNullOrEmpty(sqlText))
+                            {
+                                sqlStatements.Add(sqlText);
+                            }
+                        }
+                        
+                        // Recursively search nested objects
+                        ExtractSqlFromJsonElement(property.Value, sqlStatements);
+                    }
+                    break;
+                    
+                case System.Text.Json.JsonValueKind.Array:
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        ExtractSqlFromJsonElement(item, sqlStatements);
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Check if a property name indicates it contains SQL statement information.
+        /// </summary>
+        private static bool IsSqlStatementProperty(string propertyName)
+        {
+            // Based on libpgquery PL/pgSQL AST structure, look for properties that contain SQL
+            return propertyName.Contains("stmt", StringComparison.OrdinalIgnoreCase) ||
+                   propertyName.Contains("query", StringComparison.OrdinalIgnoreCase) ||
+                   propertyName.Contains("sql", StringComparison.OrdinalIgnoreCase) ||
+                   propertyName.Equals("PLpgSQL_stmt_execsql", StringComparison.OrdinalIgnoreCase) ||
+                   propertyName.Equals("PLpgSQL_stmt_dynexecute", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Extract SQL text from a JSON property value.
+        /// </summary>
+        private static string? ExtractSqlTextFromProperty(System.Text.Json.JsonElement element)
+        {
+            if (element.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                return element.GetString();
+            }
+            
+            if (element.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                // Look for common SQL text fields in PL/pgSQL AST nodes
+                if (element.TryGetProperty("sqlstmt", out var sqlstmt) && sqlstmt.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    return sqlstmt.GetString();
+                }
+                
+                if (element.TryGetProperty("query", out var query) && query.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    return query.GetString();
+                }
+                
+                if (element.TryGetProperty("sql", out var sql) && sql.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    return sql.GetString();
+                }
+            }
+            
+            return null;
         }
 
         /// <summary>
@@ -510,6 +1199,7 @@ namespace PgQuery.NET.Analysis
             private readonly object _target;
             private readonly string _targetString;
             private readonly bool _isWildcard;
+            private readonly bool _isNil;
             private readonly bool _isAttributePattern;
             private readonly string _attributeName;
             private readonly object _attributeValue;
@@ -519,70 +1209,81 @@ namespace PgQuery.NET.Analysis
                 _target = target;
                 _targetString = target?.ToString() ?? "";
                 _isWildcard = _targetString == "_";
+                _isNil = _targetString == "nil";
                 
                 // Check if this is an s-expression attribute pattern: (relname "users")
                 _isAttributePattern = ParseAttributePattern(_targetString, out _attributeName, out _attributeValue);
             }
-            
+
             public bool IsEllipsis() => _targetString == "...";
+            public bool IsWildcard() => _isWildcard;
+            public bool IsNil() => _isNil;
 
-            public bool Match(IMessage node)
+            public bool MatchesDirectValue(object value)
             {
-                if (node == null) return _targetString == "nil";
-                
-                // Performance: Fast path for wildcards
                 if (_isWildcard) return true;
+                if (_isNil) return value == null;
+                if (_isAttributePattern) return false; // Attribute patterns don't match direct values
+                return MatchesValue(value, _target);
+            }
 
-                // Handle s-expression attribute patterns: (relname "users")
+            // Core matching logic - this is the heart of all pattern matching
+            protected virtual bool MatchCore(IMessage node)
+            {
+                if (node == null) return _isWildcard || _isNil;
+                if (_isWildcard) return true;
+                if (_isNil) return false; // nil doesn't match existing nodes
+                
+                // Handle ellipsis pattern - matches nodes with children
+                if (IsEllipsis())
+                {
+                    DebugLog($"[Find] Checking ellipsis pattern against node: {node?.Descriptor?.Name}");
+                    return HasChildren(node);
+                }
+                
+                DebugLog($"[Find] Matching '{_targetString}' against node: {node?.Descriptor?.Name}");
+
+                // Handle attribute patterns like (relname "users")
                 if (_isAttributePattern)
                 {
+                    DebugLog($"[Find] Checking attribute pattern: {_attributeName} = {_attributeValue}");
                     return MatchesAttribute(node, _attributeName, _attributeValue);
                 }
 
-                // Handle common patterns efficiently
-                if (_targetString == "...")
+                // Handle node type matching
+                var nodeType = node?.Descriptor?.Name ?? "";
+                if (MatchesNodeType(nodeType, _targetString))
                 {
-                    return HasChildren(node);
-                }
-
-                // Check node type with case-insensitive and case conversion support
-                var nodeTypeName = node.Descriptor?.Name;
-                if (nodeTypeName != null && MatchesNodeType(nodeTypeName, _targetString))
-                {
+                    DebugLog($"[Find] Node type match: {nodeType} matches {_targetString}");
                     return true;
                 }
 
-                // Check field values - optimized iteration
-                var descriptor = node.Descriptor;
-                if (descriptor != null)
+                // Handle nested value matching
+                if (MatchesNestedValue(node, _target))
                 {
-                    foreach (var field in descriptor.Fields.InFieldNumberOrder())
-                    {
-                        var value = field.Accessor.GetValue(node);
-                        if (value != null && MatchesValue(value, _target))
-                        {
-                            return true;
-                        }
-                    }
+                    DebugLog($"[Find] Nested value match found");
+                    return true;
                 }
 
+                DebugLog($"[Find] No match found for '{_targetString}' against {nodeType}");
                 return false;
             }
-            
-            // Enhanced node type matching with case conversion support
+
+            // Public interface - can be overridden by specialized classes
+            public virtual bool Match(IMessage node) => MatchCore(node);
+
+            // Helper methods for pattern matching
             private bool MatchesNodeType(string nodeType, string pattern)
             {
-                // Direct match
-                if (nodeType == pattern) return true;
+                if (string.IsNullOrEmpty(nodeType) || string.IsNullOrEmpty(pattern)) return false;
                 
-                // Case-insensitive match
-                if (string.Equals(nodeType, pattern, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                // Direct match
+                if (string.Equals(nodeType, pattern, StringComparison.OrdinalIgnoreCase)) return true;
                 
                 // Handle case conversions
-                return SqlPatternMatcher.HandleCaseConversions(nodeType, pattern);
+                if (HandleCaseConversions(nodeType, pattern)) return true;
+                
+                return false;
             }
 
             // Performance: Optimized value matching with case-insensitive handling
@@ -611,103 +1312,93 @@ namespace PgQuery.NET.Analysis
                     return true;
                 }
                 
-                // Numeric comparison for different types
+                // Numeric comparison for performance
                 if (IsNumeric(value) && IsNumeric(target))
+                {
+                    return value.Equals(target);
+                }
+                
+                return false;
+            }
+
+            private bool MatchesNestedValue(IMessage message, object target)
+            {
+                if (message?.Descriptor == null) return false;
+
+                foreach (var field in message.Descriptor.Fields.InFieldNumberOrder())
                 {
                     try
                     {
-                        return Convert.ToDouble(value) == Convert.ToDouble(target);
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                }
-                
-                // For protobuf nested structures, recursively check nested values
-                if (value is IMessage nestedMessage)
-                {
-                    return MatchesNestedValue(nestedMessage, target);
-                }
-
-                return false;
-            }
-
-            
-            private bool MatchesNestedValue(IMessage message, object target)
-            {
-                var descriptor = message.Descriptor;
-                if (descriptor == null) return false;
-
-                foreach (var field in descriptor.Fields.InFieldNumberOrder())
-                {
-                    var fieldValue = field.Accessor.GetValue(message);
-                    
-                    if (fieldValue != null)
-                    {
-                        // Direct match
-                        if (MatchesValue(fieldValue, target)) return true;
+                        var fieldValue = field.Accessor.GetValue(message);
                         
-                        // For repeated fields
-                        if (field.IsRepeated && fieldValue is System.Collections.IList list)
+                        if (field.IsRepeated)
                         {
-                            foreach (var item in list)
+                            var list = (System.Collections.IList?)fieldValue;
+                            if (list != null)
                             {
-                                if (item != null && MatchesValue(item, target)) return true;
+                                foreach (var item in list)
+                                {
+                                    if (MatchesValue(item, target)) return true;
+                                }
                             }
                         }
+                        else if (fieldValue != null)
+                        {
+                            if (MatchesValue(fieldValue, target)) return true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"[Find] Error accessing field {field.Name}: {ex.Message}");
                     }
                 }
                 return false;
             }
 
-            // Performance: Fast numeric type checking
             private bool IsNumeric(object value) =>
                 value is int || value is long || value is float || value is double || value is decimal;
 
-            // Performance: Optimized children checking
             private bool HasChildren(IMessage node)
             {
-                var descriptor = node.Descriptor;
-                if (descriptor == null) return false;
-
-                foreach (var field in descriptor.Fields.InFieldNumberOrder())
+                if (node?.Descriptor == null) return false;
+                
+                foreach (var field in node.Descriptor.Fields.InFieldNumberOrder())
                 {
-                    if (field.IsRepeated)
+                    try
                     {
-                        var list = (System.Collections.IList)field.Accessor.GetValue(node);
-                        if (list != null && list.Count > 0) return true;
+                        var fieldValue = field.Accessor.GetValue(node);
+                        
+                        if (field.IsRepeated)
+                        {
+                            var list = (System.Collections.IList?)fieldValue;
+                            if (list != null && list.Count > 0) return true;
+                        }
+                        else if (fieldValue is IMessage) return true;
                     }
-                    else
+                    catch
                     {
-                        var value = field.Accessor.GetValue(node);
-                        if (value is IMessage) return true;
+                        // Continue checking other fields
                     }
                 }
                 return false;
             }
 
-            // Parse s-expression attribute pattern: (relname "users")
             private bool ParseAttributePattern(string pattern, out string attributeName, out object attributeValue)
             {
                 attributeName = "";
                 attributeValue = "";
-
-                if (string.IsNullOrEmpty(pattern) || !pattern.StartsWith("(") || !pattern.EndsWith(")"))
-                    return false;
-
-                // Remove parentheses
+                
+                // Check for s-expression pattern: (attribute "value")
+                if (!pattern.StartsWith("(") || !pattern.EndsWith(")")) return false;
+                
                 var inner = pattern.Substring(1, pattern.Length - 2).Trim();
+                var parts = inner.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
                 
-                // Split on whitespace - simple approach
-                var parts = inner.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length != 2) return false;
                 
-                if (parts.Length != 2)
-                    return false;
-
-                attributeName = parts[0];
-                var valueStr = parts[1];
-
+                attributeName = parts[0].Trim();
+                var valueStr = parts[1].Trim();
+                
                 // Parse the value (remove quotes if present)
                 if (valueStr.StartsWith("\"") && valueStr.EndsWith("\"") && valueStr.Length > 1)
                 {
@@ -717,41 +1408,42 @@ namespace PgQuery.NET.Analysis
                 {
                     attributeValue = valueStr.Substring(1, valueStr.Length - 2);
                 }
-                else if (int.TryParse(valueStr, out var intValue))
-                {
-                    attributeValue = intValue;
-                }
-                else if (double.TryParse(valueStr, out var doubleValue))
-                {
-                    attributeValue = doubleValue;
-                }
-                else if (bool.TryParse(valueStr, out var boolValue))
-                {
-                    attributeValue = boolValue;
-                }
                 else
                 {
-                    attributeValue = valueStr; // Keep as string
+                    attributeValue = valueStr;
                 }
-
-
+                
                 return true;
             }
 
-            // Match node by specific attribute value
             private bool MatchesAttribute(IMessage node, string attributeName, object expectedValue)
             {
-                if (node?.Descriptor == null) return false;
+                if (node?.Descriptor == null || string.IsNullOrEmpty(attributeName)) return false;
 
-                var field = node.Descriptor.Fields.InDeclarationOrder()
-                    .FirstOrDefault(f => f.Name.Equals(attributeName, StringComparison.OrdinalIgnoreCase));
+                DebugLog($"[Find] Checking attribute {attributeName} against node {node.Descriptor.Name}");
                 
-                if (field == null) return false;
+                // Find the field with the given name
+                var field = node.Descriptor.Fields.InFieldNumberOrder()
+                    .FirstOrDefault(f => string.Equals(f.Name, attributeName, StringComparison.OrdinalIgnoreCase));
+                
+                if (field == null)
+                {
+                    DebugLog($"[Find] Field {attributeName} not found in {node.Descriptor.Name}");
+                    return false;
+                }
 
-                var actualValue = field.Accessor.GetValue(node);
-                if (actualValue == null) return false;
-
-                return MatchesValue(actualValue, expectedValue);
+                try
+                {
+                    var fieldValue = field.Accessor.GetValue(node);
+                    DebugLog($"[Find] Field {attributeName} has value: {fieldValue}");
+                    
+                    return MatchesValue(fieldValue, expectedValue);
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"[Find] Error accessing field {attributeName}: {ex.Message}");
+                    return false;
+                }
             }
         }
 
@@ -784,83 +1476,58 @@ namespace PgQuery.NET.Analysis
         }
 
         // All Expression - AND operation with short-circuit evaluation
-        private class All : IExpression
+        private class All : Find
         {
             private readonly IExpression[] _expressions;
 
-            public All(IExpression[] expressions) => _expressions = expressions;
+            public All(IExpression[] expressions) : base("_") => _expressions = expressions;
 
-            public bool Match(IMessage node)
+            public override bool Match(IMessage node)
             {
-                // Handle special case for recursive child validation patterns like (A_Const ... (_ {true 1}))
-                // Check if pattern has form: nodeType + "..." + childPattern
-                if (_expressions.Length >= 3 && 
+                Console.WriteLine($"[All] Matching All expression with {_expressions.Length} parts against node: {node?.Descriptor?.Name}");
+                
+                // First try base Find logic for attribute patterns and simple matching
+                if (base.Match(node)) return true;
+                
+                // Handle patterns that start with Until expressions (ellipsis patterns)
+                // For patterns like (... something) or (SelectStmt ... something)
+                for (int i = 0; i < _expressions.Length; i++)
+                {
+                    if (_expressions[i] is Until untilExpr)
+                    {
+                        Console.WriteLine($"[All] Detected Until expression at index {i}");
+                        
+                        // If we have expressions before the Until, they must match first
+                        for (int j = 0; j < i; j++)
+                        {
+                            if (!_expressions[j].Match(node))
+                            {
+                                Console.WriteLine($"[All] Expression {j} failed to match before Until");
+                                return false;
+                            }
+                        }
+                        
+                        Console.WriteLine($"[All] All expressions before Until matched, now applying Until");
+                        // The Until expression searches in the subtree for its targets
+                        return untilExpr.Match(node);
+                    }
+                }
+                
+                // Handle 2-part ellipsis patterns like (SelectStmt ...)
+                if (_expressions.Length == 2 && 
                     _expressions[1] is Find ellipsisFind && ellipsisFind.IsEllipsis())
                 {
                     // First expression should match the current node
                     if (!_expressions[0].Match(node)) return false;
                     
                     // Second expression (...) should confirm node has children
-                    if (!_expressions[1].Match(node)) return false;
-                    
-                    // Remaining expressions should match against children
-                    var childExpressions = _expressions.Skip(2).ToArray();
-                    if (childExpressions.Length > 0)
-                    {
-                        return MatchChildren(node, childExpressions);
-                    }
-                    return true;
+                    return _expressions[1].Match(node);
                 }
                 
                 // Standard All behavior: all expressions must match the same node
                 foreach (var expr in _expressions)
                 {
                     if (!expr.Match(node)) return false;
-                }
-                return true;
-            }
-            
-            private bool MatchChildren(IMessage node, IExpression[] childExpressions)
-            {
-                if (node == null) return false;
-
-                var descriptor = node.Descriptor;
-                if (descriptor == null) return false;
-
-                // Check each child field
-                foreach (var field in descriptor.Fields.InFieldNumberOrder())
-                {
-                    if (field.IsRepeated)
-                    {
-                        var list = (System.Collections.IList)field.Accessor.GetValue(node);
-                        if (list != null)
-                        {
-                            foreach (var item in list)
-                            {
-                                if (item is IMessage child && MatchAllChildExpressions(child, childExpressions))
-                                {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        var value = field.Accessor.GetValue(node);
-                        if (value is IMessage child && MatchAllChildExpressions(child, childExpressions))
-                        {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }
-            
-            private bool MatchAllChildExpressions(IMessage child, IExpression[] expressions)
-            {
-                foreach (var expr in expressions)
-                {
-                    if (!expr.Match(child)) return false;
                 }
                 return true;
             }
@@ -938,6 +1605,139 @@ namespace PgQuery.NET.Analysis
             }
         }
 
+        // Until Expression - ellipsis pattern matching with recursive traversal
+        private class Until : IExpression
+        {
+            private readonly IExpression[] _expressions;
+
+            public Until(IExpression[] expressions) 
+            {
+                _expressions = expressions;
+                Console.WriteLine($"[Until] Created Until expression with {expressions.Length} target expressions");
+            }
+
+            public Until(IExpression expression) 
+            {
+                _expressions = new[] { expression };
+                Console.WriteLine($"[Until] Created Until expression with single target: {expression?.GetType().Name}");
+            }
+
+            public bool Match(IMessage node)
+            {
+                Console.WriteLine($"[Until] Matching {_expressions.Length} expressions against node: {node?.Descriptor?.Name}");
+                
+                // All target expressions must be found somewhere in the subtree
+                foreach (var expr in _expressions)
+                {
+                    var result = SearchInSubtree(node, expr);
+                    Console.WriteLine($"[Until] Expression {expr.GetType().Name} search result: {result}");
+                    if (!result)
+                    {
+                        Console.WriteLine($"[Until] Failed to find expression {expr.GetType().Name} in subtree");
+                        return false;
+                    }
+                }
+                
+                Console.WriteLine($"[Until] All expressions found in subtree");
+                return true;
+            }
+
+            private bool SearchInSubtree(IMessage node, IExpression targetExpression)
+            {
+                if (node == null) 
+                {
+                    Console.WriteLine($"[Until] Node is null, returning false");
+                    return false;
+                }
+
+                Console.WriteLine($"[Until] Checking node: {node.Descriptor?.Name}");
+                
+                // First check if the target expression matches the current node
+                if (targetExpression.Match(node)) 
+                {
+                    Console.WriteLine($"[Until] Target expression matched current node!");
+                    return true;
+                }
+
+                var descriptor = node.Descriptor;
+                if (descriptor == null) 
+                {
+                    Console.WriteLine($"[Until] Node descriptor is null");
+                    return false;
+                }
+
+                // Recursively search all children - improved traversal
+                foreach (var field in descriptor.Fields.InFieldNumberOrder())
+                {
+                    Console.WriteLine($"[Until] Checking field: {field.Name} (repeated: {field.IsRepeated})");
+                    
+                    try
+                    {
+                        var fieldValue = field.Accessor.GetValue(node);
+                        
+                        if (field.IsRepeated)
+                        {
+                            var list = (System.Collections.IList?)fieldValue;
+                            if (list != null)
+                            {
+                                Console.WriteLine($"[Until] Field {field.Name} has {list.Count} items");
+                                foreach (var item in list)
+                                {
+                                    if (item is IMessage child)
+                                    {
+                                        if (SearchInSubtree(child, targetExpression))
+                                        {
+                                            Console.WriteLine($"[Until] Found match in repeated field {field.Name}");
+                                            return true;
+                                        }
+                                    }
+                                    else if (item != null)
+                                    {
+                                        Console.WriteLine($"[Until] Non-message item in {field.Name}: {item} ({item.GetType().Name})");
+                                        // For attribute patterns, also check non-message values
+                                        if (targetExpression is Find findExpr && findExpr.MatchesDirectValue(item))
+                                        {
+                                            Console.WriteLine($"[Until] Direct value match found!");
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (fieldValue is IMessage child)
+                            {
+                                if (SearchInSubtree(child, targetExpression))
+                                {
+                                    Console.WriteLine($"[Until] Found match in field {field.Name}");
+                                    return true;
+                                }
+                            }
+                            else if (fieldValue != null)
+                            {
+                                Console.WriteLine($"[Until] Non-message field {field.Name}: {fieldValue} ({fieldValue.GetType().Name})");
+                                // For attribute patterns, also check non-message values
+                                if (targetExpression is Find findExpr && findExpr.MatchesDirectValue(fieldValue))
+                                {
+                                    Console.WriteLine($"[Until] Direct value match found in field {field.Name}!");
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Until] Error accessing field {field.Name}: {ex.Message}");
+                        // Continue with other fields
+                    }
+                }
+                
+                Console.WriteLine($"[Until] No match found in subtree of {node.Descriptor?.Name}");
+                return false;
+            }
+        }
+
         // Expression Parser - with performance optimizations
         private class ExpressionParser
         {
@@ -960,7 +1760,9 @@ namespace PgQuery.NET.Analysis
                 if (_tokens.Count == 0) return LITERALS["_"];
 
                 var token = _tokens.Dequeue();
-                return token switch
+                DebugLog($"[Parser] Parsing token: '{token}'");
+                
+                var result = token switch
                 {
                     "(" => new All(ParseUntil(")")),
                     "[" => new All(ParseUntil("]")),
@@ -969,10 +1771,14 @@ namespace PgQuery.NET.Analysis
                     "!" => new Not(Parse()),
                     "?" => new Maybe(Parse()),
                     "^" => new Parent(Parse()),
+                    "..." => new Until(ParseUntil("")),
                     var str when str.StartsWith("\"") && str.EndsWith("\"") => new Find(str[1..^1]),
                     var str when LITERALS.ContainsKey(str) => LITERALS[str],
                     _ => new Find(TypecastValue(token))
                 };
+                
+                DebugLog($"[Parser] Created expression: {result.GetType().Name}");
+                return result;
             }
 
             private IExpression[] ParseUntil(string endToken)
@@ -985,7 +1791,7 @@ namespace PgQuery.NET.Analysis
                 if (_tokens.Count > 0) _tokens.Dequeue(); // Remove end token
                 return expressions.ToArray();
             }
-
+                
             // Performance: Optimized value type casting
             private object TypecastValue(string token)
             {
@@ -1001,6 +1807,173 @@ namespace PgQuery.NET.Analysis
                 if (double.TryParse(token, out var doubleValue)) return doubleValue;
                 
                 return token;
+            }
+        }
+
+        /// <summary>
+        /// Get parse tree with PL/pgSQL support for visualization.
+        /// </summary>
+        /// <param name="sql">SQL string to parse</param>
+        /// <param name="includeDoStmt">Whether to include parsed DoStmt content</param>
+        /// <returns>Parse result with embedded PL/pgSQL trees</returns>
+        public static ParseResult? GetParseTreeWithPlPgSql(string sql, bool includeDoStmt = true)
+        {
+            try
+            {
+                var parseResult = PgQuery.Parse(sql);
+                
+                if (includeDoStmt && parseResult?.ParseTree?.Stmts != null)
+                {
+                    // Process DoStmt nodes to include their PL/pgSQL content
+                    foreach (var stmt in parseResult.ParseTree.Stmts)
+                    {
+                        if (stmt?.Stmt != null)
+                        {
+                            ProcessDoStmtForTree(stmt.Stmt);
+                        }
+                    }
+                }
+                
+                return parseResult;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SqlPatternMatcher] Parse tree generation failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Process DoStmt nodes recursively to include PL/pgSQL content.
+        /// </summary>
+        private static void ProcessDoStmtForTree(IMessage node)
+        {
+            if (node == null) return;
+
+            // Check if this is a DoStmt
+            if (node.Descriptor?.Name == "DoStmt")
+            {
+                var plpgsqlContent = ExtractSqlFromDoStmt(node);
+                if (!string.IsNullOrEmpty(plpgsqlContent))
+                {
+                    try
+                    {
+                        // Parse the PL/pgSQL content
+                        var plpgsqlJson = PgQuery.ParsePlpgsql(plpgsqlContent);
+                        
+                        // Store the parsed content for tree visualization
+                        // This would typically be stored as metadata or in a wrapper
+                        DebugLog($"[ProcessDoStmtForTree] Parsed PL/pgSQL content for tree: {plpgsqlJson.Length} chars");
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"[ProcessDoStmtForTree] Failed to parse PL/pgSQL: {ex.Message}");
+                    }
+                }
+            }
+
+            // Recursively process children
+            var descriptor = node.Descriptor;
+            if (descriptor != null)
+            {
+                foreach (var field in descriptor.Fields.InFieldNumberOrder())
+                {
+                    if (field.IsRepeated)
+                    {
+                        var list = (System.Collections.IList)field.Accessor.GetValue(node);
+                        if (list != null)
+                        {
+                            foreach (var item in list)
+                            {
+                                if (item is IMessage child)
+                                {
+                                    ProcessDoStmtForTree(child);
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var value = field.Accessor.GetValue(node);
+                        if (value is IMessage child)
+                        {
+                            ProcessDoStmtForTree(child);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Search within PL/pgSQL content.
+        /// </summary>
+        private static void SearchInPlPgSql(IExpression expression, PlPgSqlWrapper plpgsqlWrapper, List<IMessage> results)
+        {
+            // Check if the expression matches the PL/pgSQL wrapper itself
+            if (expression.Match(plpgsqlWrapper))
+            {
+                results.Add(plpgsqlWrapper);
+            }
+            
+            // Parse the JSON and create searchable nodes from the PL/pgSQL AST
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(plpgsqlWrapper.PlPgSqlJson);
+                
+                // Create virtual nodes from the PL/pgSQL AST for searching
+                var plpgsqlNodes = CreateSearchableNodesFromPlPgSqlJson(doc.RootElement);
+                
+                foreach (var node in plpgsqlNodes)
+                {
+                    if (expression.Match(node))
+                    {
+                        results.Add(node);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"[SearchInPlPgSql] Failed to parse PL/pgSQL JSON for searching: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Create searchable nodes from PL/pgSQL JSON AST.
+        /// </summary>
+        private static List<IMessage> CreateSearchableNodesFromPlPgSqlJson(System.Text.Json.JsonElement rootElement)
+        {
+            var nodes = new List<IMessage>();
+            
+            CreateSearchableNodesRecursive(rootElement, nodes);
+            
+            return nodes;
+        }
+
+        /// <summary>
+        /// Recursively create searchable nodes from PL/pgSQL JSON elements.
+        /// </summary>
+        private static void CreateSearchableNodesRecursive(System.Text.Json.JsonElement element, List<IMessage> nodes)
+        {
+            switch (element.ValueKind)
+            {
+                case System.Text.Json.JsonValueKind.Object:
+                    // Create a wrapper node for this JSON object
+                    var wrapperNode = new PlPgSqlJsonNode(element);
+                    nodes.Add(wrapperNode);
+                    
+                    // Recursively process nested objects
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        CreateSearchableNodesRecursive(property.Value, nodes);
+                    }
+                    break;
+                    
+                case System.Text.Json.JsonValueKind.Array:
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        CreateSearchableNodesRecursive(item, nodes);
+                    }
+                    break;
             }
         }
     }
