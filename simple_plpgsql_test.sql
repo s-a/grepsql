@@ -1,0 +1,1 @@
+DO $$ SELECT * FROM test; $$;

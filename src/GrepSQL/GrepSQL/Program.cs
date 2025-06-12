@@ -2,12 +2,14 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CommandLine;
 using Google.Protobuf;
 using PgQuery.NET;
 using PgQuery.NET.Analysis;
+using PgQuery.NET.AST;
 
 namespace GrepSQL
 {
@@ -156,7 +158,7 @@ namespace GrepSQL
                 var sql = sqlStatements[i].Sql.Trim();
                 if (string.IsNullOrEmpty(sql)) continue;
 
-                try
+                                try
                 {
                     // Use Search for recursive pattern matching instead of MatchWithDetails
                     var searchResults = SqlPatternMatcher.Search(pattern, sql, debug);
@@ -172,22 +174,85 @@ namespace GrepSQL
                     
                     if (success)
                     {
-                        var ast = SqlPatternMatcher.ParseSql(sql);
-                        var matchingPath = new HashSet<IMessage>(searchResults); // Use actual search results
-                        var matchingNodes = new List<IMessage>(searchResults); // Keep list for highlighting
+                        // Check if any results are from DoStmt extraction
+                        bool hasDoStmtResults = searchResults.Any(r => r.GetType().Name == "DoStmtWrapper");
                         
-                        string details = debug ? $"Found {searchResults.Count} matches" : "";
-                        
-                        matches.Add(new SqlMatch
+                        if (hasDoStmtResults)
                         {
-                            FileName = fileName,
-                            Sql = sql,
-                            Ast = ast?.ParseTree?.Stmts?.FirstOrDefault()?.Stmt,
-                            LineNumber = sqlStatements[i].LineNumber,
-                            MatchDetails = details,
-                            MatchingPath = matchingPath,
-                            MatchingNodes = matchingNodes
-                        });
+                            // Handle DoStmt matches separately
+                            foreach (var result in searchResults)
+                            {
+                                if (result.GetType().Name == "DoStmtWrapper")
+                                {
+                                    // Use reflection to get ExtractedSql property
+                                    var extractedSqlProperty = result.GetType().GetProperty("ExtractedSql");
+                                    var innerNodeProperty = result.GetType().GetProperty("InnerNode");
+                                    
+                                    if (extractedSqlProperty != null && innerNodeProperty != null)
+                                    {
+                                        var extractedSql = extractedSqlProperty.GetValue(result) as string ?? sql;
+                                        var innerNode = innerNodeProperty.GetValue(result) as IMessage;
+                                        
+                                        var ast = SqlPatternMatcher.ParseSql(extractedSql);
+                                        var matchingPath = new HashSet<IMessage> { innerNode };
+                                        var matchingNodes = new List<IMessage> { innerNode };
+                                        
+                                        string details = debug ? "Found match inside DO statement" : "";
+                                        
+                                        matches.Add(new SqlMatch
+                                        {
+                                            FileName = fileName,
+                                            Sql = extractedSql,
+                                            Ast = innerNode,
+                                            LineNumber = sqlStatements[i].LineNumber,
+                                            MatchDetails = details,
+                                            MatchingPath = matchingPath,
+                                            MatchingNodes = matchingNodes
+                                        });
+                                    }
+                                }
+                                else
+                                {
+                                    // Regular match
+                                    var ast = SqlPatternMatcher.ParseSql(sql);
+                                    var matchingPath = new HashSet<IMessage> { result };
+                                    var matchingNodes = new List<IMessage> { result };
+                                    
+                                    string details = debug ? "Found regular match" : "";
+                                    
+                                    matches.Add(new SqlMatch
+                                    {
+                                        FileName = fileName,
+                                        Sql = sql,
+                                        Ast = result,
+                                        LineNumber = sqlStatements[i].LineNumber,
+                                        MatchDetails = details,
+                                        MatchingPath = matchingPath,
+                                        MatchingNodes = matchingNodes
+                                    });
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Regular processing for non-DoStmt matches
+                            var ast = SqlPatternMatcher.ParseSql(sql);
+                            var matchingPath = new HashSet<IMessage>(searchResults);
+                            var matchingNodes = new List<IMessage>(searchResults);
+                            
+                            string details = debug ? $"Found {searchResults.Count} matches" : "";
+                            
+                            matches.Add(new SqlMatch
+                            {
+                                FileName = fileName,
+                                Sql = sql,
+                                Ast = ast?.ParseTree?.Stmts?.FirstOrDefault()?.Stmt,
+                                LineNumber = sqlStatements[i].LineNumber,
+                                MatchDetails = details,
+                                MatchingPath = matchingPath,
+                                MatchingNodes = matchingNodes
+                            });
+                        }
                     }
                 }
                 catch (PgQueryException ex)
@@ -210,49 +275,196 @@ namespace GrepSQL
         static List<(string Sql, int LineNumber)> SplitSqlStatements(string content)
         {
             var statements = new List<(string, int)>();
-            var lines = content.Split('\n');
-            var currentStatement = new List<string>();
+            var chars = content.ToCharArray();
+            var currentStatement = new StringBuilder();
             var startLine = 1;
+            var currentLine = 1;
+            var i = 0;
 
-            for (int i = 0; i < lines.Length; i++)
+            while (i < chars.Length)
             {
-                var line = lines[i];
-                
-                // Skip empty lines and comments at the start
-                if (currentStatement.Count == 0 && (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("--")))
+                var ch = chars[i];
+
+                // Track line numbers
+                if (ch == '\n')
                 {
-                    startLine = i + 2; // Next line (1-based)
-                    continue;
+                    currentLine++;
                 }
 
-                currentStatement.Add(line);
-
-                // Simple statement detection: ends with semicolon (not in quotes/comments)
-                if (EndsWithSemicolon(line))
+                // Skip whitespace and comments at the start of statements
+                if (currentStatement.Length == 0)
                 {
-                    var sql = string.Join("\n", currentStatement);
-                    statements.Add((sql, startLine));
+                    if (char.IsWhiteSpace(ch))
+                    {
+                        if (ch == '\n')
+                        {
+                            startLine = currentLine;
+                        }
+                        i++;
+                        continue;
+                    }
+                    
+                    // Skip SQL comments at statement start
+                    if (ch == '-' && i + 1 < chars.Length && chars[i + 1] == '-')
+                    {
+                        // Skip to end of line
+                        while (i < chars.Length && chars[i] != '\n')
+                        {
+                            i++;
+                        }
+                        continue;
+                    }
+                    
+                    // Set start line for this statement
+                    startLine = currentLine;
+                }
+
+                currentStatement.Append(ch);
+
+                // Handle different quote types
+                if (ch == '\'')
+                {
+                    // Single quote - skip until matching quote
+                    i++;
+                    while (i < chars.Length)
+                    {
+                        currentStatement.Append(chars[i]);
+                        if (chars[i] == '\'')
+                        {
+                            // Check for escaped quote
+                            if (i + 1 < chars.Length && chars[i + 1] == '\'')
+                            {
+                                i++; // Skip the escaped quote
+                                currentStatement.Append(chars[i]);
+                            }
+                            else
+                            {
+                                break; // End of quoted string
+                            }
+                        }
+                        else if (chars[i] == '\n')
+                        {
+                            currentLine++;
+                        }
+                        i++;
+                    }
+                }
+                else if (ch == '$')
+                {
+                    // Potential dollar quote - check for dollar-quoted string
+                    var dollarTag = ExtractDollarTag(chars, i);
+                    if (dollarTag != null)
+                    {
+                        // Add the opening tag
+                        for (int j = 1; j < dollarTag.Length; j++)
+                        {
+                            i++;
+                            currentStatement.Append(chars[i]);
+                            if (chars[i] == '\n') currentLine++;
+                        }
+                        
+                        // Now find the closing tag
+                        i++;
+                        while (i < chars.Length)
+                        {
+                            currentStatement.Append(chars[i]);
+                            if (chars[i] == '\n') currentLine++;
+                            
+                            // Check if we found the closing tag
+                            if (chars[i] == '$' && MatchesDollarTag(chars, i, dollarTag))
+                            {
+                                // Add the rest of the closing tag
+                                for (int j = 1; j < dollarTag.Length; j++)
+                                {
+                                    i++;
+                                    currentStatement.Append(chars[i]);
+                                    if (chars[i] == '\n') currentLine++;
+                                }
+                                break;
+                            }
+                            i++;
+                        }
+                    }
+                }
+                else if (ch == '-' && i + 1 < chars.Length && chars[i + 1] == '-')
+                {
+                    // SQL comment - skip to end of line
+                    while (i < chars.Length && chars[i] != '\n')
+                    {
+                        currentStatement.Append(chars[i]);
+                        i++;
+                    }
+                    if (i < chars.Length)
+                    {
+                        currentStatement.Append(chars[i]); // Add the newline
+                        currentLine++;
+                    }
+                }
+                else if (ch == ';')
+                {
+                    // End of statement
+                    var sql = currentStatement.ToString().Trim();
+                    if (!string.IsNullOrEmpty(sql))
+                    {
+                        statements.Add((sql, startLine));
+                    }
                     currentStatement.Clear();
-                    startLine = i + 2; // Next line (1-based)
                 }
+
+                i++;
             }
 
             // Add remaining statement if any
-            if (currentStatement.Count > 0)
+            if (currentStatement.Length > 0)
             {
-                var sql = string.Join("\n", currentStatement);
-                statements.Add((sql, startLine));
+                var sql = currentStatement.ToString().Trim();
+                if (!string.IsNullOrEmpty(sql))
+                {
+                    statements.Add((sql, startLine));
+                }
             }
 
             return statements;
         }
 
-        static bool EndsWithSemicolon(string line)
+        static string? ExtractDollarTag(char[] chars, int startPos)
         {
-            // Simple check - could be improved to handle quotes and comments
-            var trimmed = line.Trim();
-            return trimmed.EndsWith(";") && !trimmed.StartsWith("--");
+            if (startPos >= chars.Length || chars[startPos] != '$')
+                return null;
+
+            var tag = new StringBuilder("$");
+            var i = startPos + 1;
+
+            // Extract the tag (alphanumeric characters between $...$)
+            while (i < chars.Length && chars[i] != '$')
+            {
+                if (!char.IsLetterOrDigit(chars[i]) && chars[i] != '_')
+                    return null; // Invalid dollar tag
+                tag.Append(chars[i]);
+                i++;
+            }
+
+            if (i >= chars.Length || chars[i] != '$')
+                return null; // No closing $
+
+            tag.Append('$');
+            return tag.ToString();
         }
+
+        static bool MatchesDollarTag(char[] chars, int pos, string tag)
+        {
+            if (pos + tag.Length > chars.Length)
+                return false;
+
+            for (int i = 0; i < tag.Length; i++)
+            {
+                if (chars[pos + i] != tag[i])
+                    return false;
+            }
+            return true;
+        }
+
+
 
         static TreePrinter.TreeMode ParseTreeMode(string? treeModeStr)
         {

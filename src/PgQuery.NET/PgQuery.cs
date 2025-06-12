@@ -37,6 +37,12 @@ namespace PgQuery.NET
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void free_string(IntPtr ptr);
+
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern PgQueryPlpgsqlParseResult pg_query_parse_plpgsql_wrapper(string input);
+
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void pg_query_free_plpgsql_parse_result_wrapper(PgQueryPlpgsqlParseResult result);
     }
     
     // ==================== NATIVE STRUCTURES ====================
@@ -63,6 +69,13 @@ namespace PgQuery.NET
         public IntPtr filename;
         public int lineno;
         public int cursorpos;
+    }
+    
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PgQueryPlpgsqlParseResult
+    {
+        public IntPtr plpgsql_funcs;
+        public IntPtr error;
     }
     
     // ==================== MANAGED TYPES ====================
@@ -212,6 +225,44 @@ namespace PgQuery.NET
             }
         }
         
+        /// <summary>
+        /// Parse PL/pgSQL code and extract function definitions
+        /// </summary>
+        /// <param name="plpgsqlCode">The PL/pgSQL code to parse</param>
+        /// <returns>JSON string containing parsed PL/pgSQL functions</returns>
+        /// <exception cref="PgQueryException">Thrown when parsing fails</exception>
+        public static string ParsePlpgsql(string plpgsqlCode)
+        {
+            if (string.IsNullOrEmpty(plpgsqlCode))
+                throw new ArgumentException("PL/pgSQL code cannot be null or empty", nameof(plpgsqlCode));
+            
+            // Ensure the native library is loaded
+            NativeLibraryLoader.EnsureLoaded();
+            
+            var result = Native.pg_query_parse_plpgsql_wrapper(plpgsqlCode);
+            try
+            {
+                CheckForError(result.error);
+                
+                if (result.plpgsql_funcs == IntPtr.Zero)
+                {
+                    throw new PgQueryException("No PL/pgSQL functions data returned");
+                }
+                
+                var functionsJson = Marshal.PtrToStringUTF8(result.plpgsql_funcs);
+                if (string.IsNullOrEmpty(functionsJson))
+                {
+                    throw new PgQueryException("Empty PL/pgSQL functions data returned");
+                }
+                
+                return functionsJson;
+            }
+            finally
+            {
+                Native.pg_query_free_plpgsql_parse_result_wrapper(result);
+            }
+        }
+
         /// <summary>
         /// Generate a fingerprint for a PostgreSQL query
         /// </summary>

@@ -1,0 +1,163 @@
+# Cursor Rules for PgQuery.NET Repository
+
+## 🎯 Core Principles
+
+### Repository Cleanliness
+- **NEVER create unnecessary files** - Only create files that are absolutely essential for functionality
+- **Keep the repository clean and organized** - Remove temporary files, debug outputs, and unused code
+- **Maintain existing project structure** - Don't reorganize or restructure existing directories
+- **Preserve file organization** - Keep source files in appropriate directories (src/, tests/, examples/, scripts/)
+
+### Testing and Debugging Protocol
+- **ALWAYS use @grepsql.sh for testing, learning, and debugging** - This is the primary tool for SQL pattern analysis
+- **Use grepsql.sh flags to inspect patterns** - Leverage all available flags for comprehensive analysis:
+  - `-p` for patterns
+  - `-f` for file input
+  - `--from-sql` for direct SQL input
+  - `--highlight` for visual output
+  - `--highlight-style` (ansi/html/markdown) for different output formats
+  - `--tree` for AST visualization
+  - `--context` for surrounding lines
+- **Test patterns before implementing** - Use grepsql.sh to validate SQL patterns before writing code
+- **Debug with grepsql.sh first** - Before investigating complex issues, use the command-line tool to understand the AST structure
+
+## 🔧 Development Guidelines
+
+### .NET Development
+- **Follow C# coding standards** - Use PascalCase for public members, camelCase for private fields
+- **Maintain existing namespace structure** - Keep PgQuery.NET namespace organization
+- **Document public APIs** - All public methods and classes should have XML documentation
+- **Handle errors gracefully** - Use PgQueryException for query parsing errors
+- **Write unit tests** - All new functionality should include corresponding tests
+
+### SQL Pattern Matching
+- **Use s-expression syntax consistently** - Follow LISP-inspired pattern format
+- **Leverage ellipsis patterns** - Use `...` for deep AST navigation
+- **Implement flexible patterns** - Support maybe (`?`), not (`!`), and any (`{}`) patterns
+- **Test patterns with grepsql.sh** - Validate all patterns using the command-line tool before implementation
+
+### File Management
+- **Don't create temporary files** - Use in-memory processing when possible
+- **Avoid debug/log files** - Use proper logging frameworks instead of file output
+- **Keep examples minimal** - Only essential example files in examples/ directory
+- **Maintain clean git history** - Don't commit temporary or debug files
+
+## 🚀 Workflow
+
+### Before Making Changes
+1. **Understand the current structure** - Use grepsql.sh to analyze existing patterns
+2. **Test your approach** - Validate SQL patterns and logic with the command-line tool
+3. **Check existing tests** - Ensure your changes don't break existing functionality
+
+### When Implementing Features
+1. **Start with grepsql.sh** - Use the command-line tool to prototype and validate
+2. **Write tests first** - Create tests that use grepsql.sh to verify behavior
+3. **Document with examples** - Show how to use new features with grepsql.sh commands
+4. **Update README if needed** - Add new patterns or flags to the documentation
+
+### When Debugging Issues
+1. **Use grepsql.sh with --tree flag** - Visualize the AST structure
+2. **Test patterns incrementally** - Start simple and build complexity
+3. **Use --highlight for verification** - Ensure patterns match expected elements
+4. **Check with different input formats** - Test with both -f and --from-sql
+
+## 📁 File Organization Rules
+
+### Prohibited Actions
+- **No temporary files in root** - Don't create temp.sql, debug.txt, or similar files
+- **No build artifacts in src** - Keep compiled files in appropriate build directories
+- **No IDE-specific files** - Don't commit .vscode/, .idea/, or similar directories
+- **No personal debug files** - Don't create files like debug_ellipsis.cs in root
+
+### Required Structure
+- **Source code in src/** - All main code belongs in the src directory
+- **Tests in tests/** - All test files belong in the tests directory
+- **Examples in examples/** - Demonstration code only
+- **Scripts in scripts/** - Build and utility scripts only
+- **Root level minimal** - Only essential files like README.md, .gitignore, solution files
+
+## 🎨 Code Style
+
+### C# Conventions
+- Use consistent indentation (4 spaces)
+- Follow Microsoft C# coding conventions
+- Use meaningful variable and method names
+- Keep methods focused and single-purpose
+- Use async/await for I/O operations
+
+### SQL Pattern Conventions
+- Use descriptive pattern names in comments
+- Test patterns with multiple SQL examples
+- Document complex patterns with examples
+- Use consistent formatting for s-expressions
+
+## 🧪 Testing Strategy
+
+### Always Test With grepsql.sh
+```bash
+# Test basic patterns
+./grepsql.sh -p "SelectStmt" --from-sql "SELECT * FROM users"
+
+# Test complex patterns with highlighting
+./grepsql.sh -p "(... (whereClause ...))" -f sample.sql --highlight
+
+# Verify AST structure
+./grepsql.sh -p "SelectStmt" --from-sql "SELECT id FROM users" --tree
+
+# Test file processing
+./grepsql.sh -p "(relname \"users\")" -f "**/*.sql" --context 2
+```
+
+### Unit Testing
+- Write tests that mirror grepsql.sh functionality
+- Use the same patterns in both CLI and unit tests
+- Verify both positive and negative matches
+- Test error conditions and edge cases
+
+## 🔍 Pattern Development Process
+
+1. **Start with grepsql.sh exploration**
+   ```bash
+   ./grepsql.sh -p "SelectStmt" --from-sql "YOUR_SQL_HERE" --tree
+   ```
+
+2. **Refine patterns iteratively**
+   ```bash
+   ./grepsql.sh -p "(SelectStmt ... (whereClause ...))" --from-sql "YOUR_SQL_HERE" --highlight
+   ```
+
+3. **Test with real SQL files**
+   ```bash
+   ./grepsql.sh -p "YOUR_PATTERN" -f "examples/**/*.sql" --highlight --context 1
+   ```
+
+4. **Implement in C# code**
+5. **Write unit tests using the same patterns**
+6. **Update documentation with grepsql.sh examples**
+
+## 🚨 Quality Checks
+
+### Before Committing
+- [ ] No temporary files created
+- [ ] All tests pass (including grepsql.sh validation)
+- [ ] Patterns tested with command-line tool
+- [ ] Documentation updated if needed
+- [ ] No debug files or personal artifacts
+- [ ] Code follows established patterns
+
+### Repository Maintenance
+- Keep dependencies updated
+- Remove unused code and files
+- Maintain clean commit history
+- Update examples with new features
+- Ensure grepsql.sh remains the primary testing tool
+
+## 🔧 Command-Line First Approach
+
+The grepsql.sh script is the primary interface for this library. All development should consider:
+- How will users test this with grepsql.sh?
+- What flags would be useful for debugging?
+- How can the CLI tool help understand the feature?
+- What examples would demonstrate the capability?
+
+**Remember: grepsql.sh is not just a tool, it's the main way users will interact with and understand PgQuery.NET capabilities.** 

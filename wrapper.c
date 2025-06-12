@@ -41,3 +41,11 @@ PgQueryScanResult pg_query_scan_wrapper(const char* input) {
 void pg_query_free_scan_result_wrapper(PgQueryScanResult result) {
     pg_query_free_scan_result(result);
 }
+
+PgQueryPlpgsqlParseResult pg_query_parse_plpgsql_wrapper(const char* input) {
+    return pg_query_parse_plpgsql(input);
+}
+
+void pg_query_free_plpgsql_parse_result_wrapper(PgQueryPlpgsqlParseResult result) {
+    pg_query_free_plpgsql_parse_result(result);
+}

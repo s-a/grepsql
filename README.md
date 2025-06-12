@@ -76,6 +76,47 @@ SqlPatternMatcher.Matches("(sval \"admin\")", "SELECT * FROM users WHERE role = 
 // Returns 1 match for the 'admin' string constant
 ```
 
+#### **🆕 Enhanced Attribute Pattern Matching**
+**NEW**: Attribute patterns now support the full expression engine with wildcards, negation, and sets:
+
+```csharp
+// Wildcard matching - matches ANY table name
+SqlPatternMatcher.Matches("(relname _)", "SELECT * FROM users");
+SqlPatternMatcher.Matches("(relname _)", "SELECT * FROM posts");
+SqlPatternMatcher.Matches("(relname _)", "SELECT * FROM comments");
+// All return true - wildcard matches any table
+
+// Negation matching - matches tables that are NOT "users"
+SqlPatternMatcher.Matches("(relname !users)", "SELECT * FROM users");   // false
+SqlPatternMatcher.Matches("(relname !users)", "SELECT * FROM posts");   // true
+SqlPatternMatcher.Matches("(relname !users)", "SELECT * FROM orders");  // true
+
+// Set matching with negation - match specific tables but exclude others
+SqlPatternMatcher.Matches("(relname {users posts !comments})", "SELECT * FROM users");    // true
+SqlPatternMatcher.Matches("(relname {users posts !comments})", "SELECT * FROM posts");    // true
+SqlPatternMatcher.Matches("(relname {users posts !comments})", "SELECT * FROM comments"); // false
+
+// Works with any attribute - not just relname
+SqlPatternMatcher.Matches("(colname _)", sql);           // Any column name
+SqlPatternMatcher.Matches("(colname !password)", sql);   // Any column except password
+SqlPatternMatcher.Matches("(funcname {count sum avg})", sql); // Specific function names
+```
+
+**Command Line Examples:**
+```bash
+# Find any table reference
+./grepsql.sh -p "(relname _)" --from-sql "SELECT * FROM users"
+
+# Find non-users tables
+./grepsql.sh -p "(relname !users)" --from-sql "SELECT * FROM posts"
+
+# Find specific tables but exclude others
+./grepsql.sh -p "(relname {users orders !temp_table})" -f "**/*.sql"
+
+# Complex patterns with enhanced attributes
+./grepsql.sh -p "(SelectStmt ... (relname !system_tables))" -f queries.sql --highlight
+```
+
 #### **Capture and Search**
 ```csharp
 // Capture nodes for later analysis
@@ -809,3 +850,276 @@ GrepSQL supports complex pattern combinations and precise node searches:
 - `--highlight-style html` - HTML `<mark>` tags
 - `--highlight-style markdown` - Markdown **bold** syntax
 - `--context 2` - Show surrounding lines
+
+## Enhanced Attribute Pattern Matching
+
+PgQuery.NET now supports advanced attribute pattern matching with wildcards, negation, and set operations for all important PostgreSQL AST attributes. This powerful feature allows you to match against specific node attributes using the full expression engine syntax.
+
+### Supported Attributes
+
+The pattern matcher recognizes over 80 PostgreSQL AST attribute names, organized by category:
+
+#### Table and Relation Names
+- `relname`, `schemaname`, `aliasname`, `tablename`, `catalogname`
+
+#### Column and Field Names  
+- `colname`, `fieldname`, `attname`, `resname`
+
+#### Function and Procedure Names
+- `funcname`, `proname`, `oprname`, `aggname`
+
+#### Type Names
+- `typename`, `typname`, `typnamespace`
+
+#### Index and Constraint Names
+- `indexname`, `idxname`, `constraintname`, `conname`
+
+#### General Names and Identifiers
+- `name`, `defname`, `label`, `alias`, `objname`
+
+#### String Values
+- `str`, `sval`, `val`, `value`, `strval`
+
+#### Numeric Values
+- `ival`, `fval`, `dval`, `location`, `typemod`
+
+#### Boolean Values
+- `boolval`, `isnull`, `islocal`, `isnotnull`, `unique`, `primary`
+- `deferrable`, `initdeferred`, `replace`, `ifnotexists`, `missingok`
+- `concurrent`, `temporary`, `unlogged`, `setof`, `pcttype`
+
+#### Access Methods and Storage
+- `accessmethod`, `tablespacename`, `indexspace`, `storage`
+
+#### Constraint Types and Actions
+- `contype`, `fkmatchtype`, `fkupdaction`, `fkdelaction`
+
+#### Expression and Operator Types
+- `kind`, `opno`, `opfuncid`, `opresulttype`, `opcollid`
+
+#### Language and Format Specifiers
+- `language`, `funcformat`, `defaction`
+
+#### Ordering and Sorting
+- `ordering`, `nullsfirst`, `nullslast`
+
+#### Inheritance and OID References
+- `inhcount`, `typeoid`, `colloid`, `oldpktableoid`
+
+#### Subquery and CTE Names
+- `ctename`, `subquery`, `withname`
+
+#### Window Function Attributes
+- `winname`, `framestart`, `frameend`
+
+#### Trigger Attributes
+- `tgname`, `tgfoid`, `tgtype`, `tgenabled`
+
+#### Role and Permission Attributes
+- `rolname`, `grantor`, `grantee`, `privilege`
+
+#### Database and Schema Attributes
+- `datname`, `nspname`, `encoding`, `collate`, `ctype`
+
+#### Sequence Attributes
+- `seqname`, `increment`, `minvalue`, `maxvalue`, `start`, `cache`
+
+#### View Attributes
+- `viewname`, `viewquery`, `materialized`
+
+#### Extension and Foreign Data Wrapper Attributes
+- `extname`, `fdwname`, `srvname`, `usename`
+
+#### Partition Attributes
+- `partitionkey`, `partitionbound`, `partitionstrategy`
+
+#### Publication and Subscription Attributes
+- `pubname`, `subname`, `publication`, `subscription`
+
+### Pattern Syntax
+
+Attribute patterns use the syntax `(attributeName pattern)` where `pattern` can be:
+
+- **Wildcard**: `_` - matches any value
+- **Literal**: `value` - matches exact value (case-insensitive)
+- **Negation**: `!value` - matches anything except value
+- **Set**: `{value1 value2 value3}` - matches any of the values
+- **Set with exclusions**: `{value1 value2 !value3}` - matches value1 or value2, but not value3
+
+### Examples
+
+#### Table Name Patterns
+
+```csharp
+// C# API
+var results = SqlPatternMatcher.Search("(relname _)", sql);        // Any table
+var results = SqlPatternMatcher.Search("(relname users)", sql);    // Specific table
+var results = SqlPatternMatcher.Search("(relname !temp)", sql);    // Not temp tables
+var results = SqlPatternMatcher.Search("(relname {users posts})", sql); // Users or posts tables
+```
+
+```bash
+# Command line
+./grepsql.sh -p "(relname _)" -f "schema.sql"
+./grepsql.sh -p "(relname users)" --from-sql "CREATE TABLE users (id SERIAL);"
+./grepsql.sh -p "(relname !temp)" -f "**/*.sql"
+./grepsql.sh -p "(relname {users posts})" -f "migrations/*.sql"
+```
+
+#### Column Name Patterns
+
+```csharp
+// Find all columns
+var allColumns = SqlPatternMatcher.Search("(colname _)", sql);
+
+// Find ID columns
+var idColumns = SqlPatternMatcher.Search("(colname id)", sql);
+
+// Find timestamp columns
+var timestamps = SqlPatternMatcher.Search("(colname {created_at updated_at published_at})", sql);
+
+// Exclude password columns
+var nonPasswords = SqlPatternMatcher.Search("(colname !password)", sql);
+```
+
+```bash
+# Find email columns
+./grepsql.sh -p "(colname email)" -f "**/*.sql" --highlight
+
+# Find common user fields
+./grepsql.sh -p "(colname {id name email})" --from-sql "CREATE TABLE users (id SERIAL, name VARCHAR(100), email VARCHAR(255));"
+```
+
+#### Function Name Patterns
+
+```csharp
+// Any function call
+var functions = SqlPatternMatcher.Search("(funcname _)", sql);
+
+// Specific functions
+var nowCalls = SqlPatternMatcher.Search("(funcname now)", sql);
+var countCalls = SqlPatternMatcher.Search("(funcname count)", sql);
+
+// Common SQL functions
+var commonFuncs = SqlPatternMatcher.Search("(funcname {now count sum avg max min})", sql);
+```
+
+#### Index and Constraint Patterns
+
+```csharp
+// Any index
+var indexes = SqlPatternMatcher.Search("(idxname _)", sql);
+
+// Specific constraint
+var emailCheck = SqlPatternMatcher.Search("(conname check_email)", sql);
+
+// Primary key constraints
+var primaryKeys = SqlPatternMatcher.Search("(primary true)", sql);
+```
+
+#### Type and Value Patterns
+
+```csharp
+// String values (includes type names)
+var stringVals = SqlPatternMatcher.Search("(sval _)", sql);
+
+// Specific data types
+var serialTypes = SqlPatternMatcher.Search("(sval serial)", sql);
+var varcharTypes = SqlPatternMatcher.Search("(sval varchar)", sql);
+
+// Common data types
+var commonTypes = SqlPatternMatcher.Search("(sval {int4 varchar text timestamp})", sql);
+
+// Programming languages
+var languages = SqlPatternMatcher.Search("(sval {plpgsql sql c})", sql);
+```
+
+#### Boolean Flag Patterns
+
+```csharp
+// Unique constraints
+var uniqueConstraints = SqlPatternMatcher.Search("(unique true)", sql);
+
+// Non-deferrable constraints
+var nonDeferrable = SqlPatternMatcher.Search("(deferrable false)", sql);
+
+// NOT NULL constraints
+var notNulls = SqlPatternMatcher.Search("(isnotnull true)", sql);
+```
+
+#### Complex Combination Patterns
+
+```csharp
+// Email column in users table
+var userEmails = SqlPatternMatcher.Search("(... (relname users) (colname email))", sql);
+
+// Unique constraints on any table
+var uniqueConstraints = SqlPatternMatcher.Search("(... (contype ConstrUnique) (relname _))", sql);
+
+// Functions returning INTEGER
+var intFunctions = SqlPatternMatcher.Search("(... (funcname _) (sval int4))", sql);
+
+// B-tree indexes
+var btreeIndexes = SqlPatternMatcher.Search("(... (idxname _) (accessmethod btree))", sql);
+```
+
+### Command Line Usage
+
+The enhanced attribute patterns work seamlessly with the `grepsql.sh` command-line tool:
+
+```bash
+# Find all table references
+./grepsql.sh -p "(relname _)" -f "**/*.sql"
+
+# Find specific tables with context
+./grepsql.sh -p "(relname {users posts})" -f "schema.sql" --highlight
+
+# Find non-system tables
+./grepsql.sh -p "(relname !{pg_% information_schema})" -f "dump.sql"
+
+# Complex pattern with context
+./grepsql.sh -p "(... (relname users) (colname email))" -f "queries.sql" --context 2
+
+# Performance analysis
+./grepsql.sh -p "(funcname {count sum avg max min})" -f "analytics.sql" --highlight-style ansi
+```
+
+### Integration with Existing Patterns
+
+Enhanced attribute patterns work seamlessly with existing pattern syntax:
+
+```csharp
+// Combine with ellipsis for deep matching
+var pattern = "(SelectStmt ... (relname _) ... (colname {id email}))";
+
+// Use in complex expressions
+var pattern = "(InsertStmt (relation (relname !temp_table)) ...)";
+
+// Combine with other node types
+var pattern = "(... (FuncCall (funcname count)) (relname _))";
+```
+
+### Performance Considerations
+
+- Attribute patterns are optimized for common PostgreSQL AST attributes
+- Wildcard patterns (`_`) are highly efficient
+- Set patterns with many values are optimized internally
+- Complex patterns with ellipsis may require more processing time
+- Use specific patterns when possible for better performance
+
+### Testing and Debugging
+
+Use the comprehensive test suite to verify pattern behavior:
+
+```bash
+# Run all attribute pattern tests
+dotnet test --filter "TestAttributePattern"
+
+# Run specific pattern tests
+dotnet test --filter "TestRelNamePatternMatching"
+
+# Test with debug output
+./grepsql.sh -p "(relname _)" --from-sql "CREATE TABLE test (id SERIAL);" --tree
+```
+
+The enhanced attribute pattern matching makes PgQuery.NET a powerful tool for SQL analysis, security auditing, performance optimization, and database refactoring tasks.

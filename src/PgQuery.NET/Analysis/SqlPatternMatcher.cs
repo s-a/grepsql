@@ -777,31 +777,145 @@ namespace PgQuery.NET.Analysis
         /// </summary>
         private static IExpression CompileExpression(string pattern)
         {
-            // Performance optimization for empty/null patterns
-            if (string.IsNullOrWhiteSpace(pattern)) return LITERALS["_"];
-            
-            // Performance optimization for simple literal patterns
-            if (IsSimplePattern(pattern) && _commonWildcards.Contains(pattern))
+            try
             {
-                return LITERALS.GetValueOrDefault(pattern, new Find(pattern));
-            }
-            
-            // Check if this is a complex pattern that needs parsing
-            if (pattern.Contains("...") || pattern.Contains("$") || pattern.Contains("!") || 
-                pattern.Contains("?") || pattern.Contains("^") || pattern.Contains("[") || 
-                pattern.Contains("{"))
-            {
-                return new ExpressionParser(pattern).Parse();
-            }
+                // Check for attribute patterns first before general parsing
+                if (IsAttributePattern(pattern))
+                {
+                    DebugLog($"[CompileExpression] Detected attribute pattern: {pattern}");
+                    return new Find(pattern);
+                }
+                
+                // Check for simple patterns that can use cached literals
+                if (IsSimplePattern(pattern))
+                {
+                    if (LITERALS.TryGetValue(pattern, out var literal))
+                    {
+                        return literal;
+                    }
+                }
 
-            // Check for s-expression attribute pattern AFTER checking for complex patterns
-            // Simple parentheses patterns like (relname "users") are handled as Find expressions
-            if (pattern.StartsWith("(") && pattern.EndsWith(")"))
+                // Use the expression parser for complex patterns
+                var parser = new ExpressionParser(pattern);
+                return parser.Parse();
+            }
+            catch (Exception ex)
             {
+                DebugLog($"[CompileExpression] Failed to compile pattern '{pattern}': {ex.Message}");
+                // Fallback to a simple Find expression
                 return new Find(pattern);
             }
+        }
+        
+        private static bool IsAttributePattern(string pattern)
+        {
+            // Check if pattern looks like (attributeName value_expression)
+            if (!pattern.StartsWith("(") || !pattern.EndsWith(")")) return false;
             
-            return new ExpressionParser(pattern).Parse();
+            var inner = pattern.Substring(1, pattern.Length - 2).Trim();
+            var parts = inner.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            
+            if (parts.Length != 2) return false;
+            
+            var attributeName = parts[0].Trim();
+            var valueExpression = parts[1].Trim();
+            
+            // Check if the first part looks like an attribute name (no special characters)
+            if (string.IsNullOrEmpty(attributeName) || 
+                attributeName.Contains('(') || attributeName.Contains(')') ||
+                attributeName.Contains('{') || attributeName.Contains('}') ||
+                attributeName.Contains('[') || attributeName.Contains(']'))
+            {
+                return false;
+            }
+            
+            // Comprehensive list of PostgreSQL AST attribute names
+            var commonAttributes = new[] { 
+                // Table and relation names
+                "relname", "schemaname", "aliasname", "tablename", "catalogname",
+                
+                // Column and field names  
+                "colname", "fieldname", "attname", "resname",
+                
+                // Function and procedure names
+                "funcname", "proname", "oprname", "aggname",
+                
+                // Type names
+                "typename", "typname", "typnamespace",
+                
+                // Index and constraint names
+                "indexname", "idxname", "constraintname", "conname",
+                
+                // General names and identifiers
+                "name", "defname", "label", "alias", "objname",
+                
+                // String values
+                "str", "sval", "val", "value", "strval",
+                
+                // Numeric values
+                "ival", "fval", "dval", "location", "typemod",
+                
+                // Boolean values
+                "boolval", "isnull", "islocal", "isnotnull", "unique", "primary",
+                "deferrable", "initdeferred", "replace", "ifnotexists", "missingok",
+                "concurrent", "temporary", "unlogged", "setof", "pcttype",
+                
+                // Access methods and storage
+                "accessmethod", "tablespacename", "indexspace", "storage",
+                
+                // Constraint types and actions
+                "contype", "fkmatchtype", "fkupdaction", "fkdelaction",
+                
+                // Expression and operator types
+                "kind", "opno", "opfuncid", "opresulttype", "opcollid",
+                
+                // Language and format specifiers
+                "language", "funcformat", "defaction",
+                
+                // Ordering and sorting
+                "ordering", "nullsfirst", "nullslast",
+                
+                // Inheritance and OID references
+                "inhcount", "typeoid", "colloid", "oldpktableoid",
+                
+                // Subquery and CTE names
+                "ctename", "subquery", "withname",
+                
+                // Window function attributes
+                "winname", "framestart", "frameend",
+                
+                // Trigger attributes
+                "tgname", "tgfoid", "tgtype", "tgenabled",
+                
+                // Role and permission attributes
+                "rolname", "grantor", "grantee", "privilege",
+                
+                // Database and schema attributes
+                "datname", "nspname", "encoding", "collate", "ctype",
+                
+                // Sequence attributes
+                "seqname", "increment", "minvalue", "maxvalue", "start", "cache",
+                
+                // View attributes
+                "viewname", "viewquery", "materialized",
+                
+                // Extension and foreign data wrapper attributes
+                "extname", "fdwname", "srvname", "usename",
+                
+                // Partition attributes
+                "partitionkey", "partitionbound", "partitionstrategy",
+                
+                // Publication and subscription attributes
+                "pubname", "subname", "publication", "subscription"
+            };
+            
+            if (commonAttributes.Contains(attributeName.ToLowerInvariant()))
+            {
+                DebugLog($"[IsAttributePattern] Recognized attribute pattern: {attributeName} = {valueExpression}");
+                return true;
+            }
+            
+            return false;
         }
 
         /// <summary>
@@ -1197,7 +1311,7 @@ namespace PgQuery.NET.Analysis
         private class Find : IExpression
         {
             private readonly object _target;
-            private readonly string _targetString;
+            protected readonly string _targetString;
             private readonly bool _isWildcard;
             private readonly bool _isNil;
             private readonly bool _isAttributePattern;
@@ -1388,7 +1502,7 @@ namespace PgQuery.NET.Analysis
                 attributeName = "";
                 attributeValue = "";
                 
-                // Check for s-expression pattern: (attribute "value")
+                // Check for s-expression pattern: (attribute value_expression)
                 if (!pattern.StartsWith("(") || !pattern.EndsWith(")")) return false;
                 
                 var inner = pattern.Substring(1, pattern.Length - 2).Trim();
@@ -1397,23 +1511,36 @@ namespace PgQuery.NET.Analysis
                 if (parts.Length != 2) return false;
                 
                 attributeName = parts[0].Trim();
-                var valueStr = parts[1].Trim();
+                var valueExpressionStr = parts[1].Trim();
                 
-                // Parse the value (remove quotes if present)
-                if (valueStr.StartsWith("\"") && valueStr.EndsWith("\"") && valueStr.Length > 1)
+                // Parse the value expression using the same expression parser
+                // This allows full expression syntax like _, !value, {value1 value2 !value3}, etc.
+                try
                 {
-                    attributeValue = valueStr.Substring(1, valueStr.Length - 2);
+                    var expressionParser = new ExpressionParser(valueExpressionStr);
+                    var valueExpression = expressionParser.Parse();
+                    attributeValue = valueExpression;
+                    return true;
                 }
-                else if (valueStr.StartsWith("'") && valueStr.EndsWith("'") && valueStr.Length > 1)
+                catch (Exception ex)
                 {
-                    attributeValue = valueStr.Substring(1, valueStr.Length - 2);
+                    DebugLog($"[Find] Failed to parse attribute value expression '{valueExpressionStr}': {ex.Message}");
+                    
+                    // Fallback to simple string parsing for basic quoted strings
+                    if (valueExpressionStr.StartsWith("\"") && valueExpressionStr.EndsWith("\"") && valueExpressionStr.Length > 1)
+                    {
+                        attributeValue = valueExpressionStr.Substring(1, valueExpressionStr.Length - 2);
+                    }
+                    else if (valueExpressionStr.StartsWith("'") && valueExpressionStr.EndsWith("'") && valueExpressionStr.Length > 1)
+                    {
+                        attributeValue = valueExpressionStr.Substring(1, valueExpressionStr.Length - 2);
+                    }
+                    else
+                    {
+                        attributeValue = valueExpressionStr;
+                    }
+                    return true;
                 }
-                else
-                {
-                    attributeValue = valueStr;
-                }
-                
-                return true;
             }
 
             private bool MatchesAttribute(IMessage node, string attributeName, object expectedValue)
@@ -1437,6 +1564,15 @@ namespace PgQuery.NET.Analysis
                     var fieldValue = field.Accessor.GetValue(node);
                     DebugLog($"[Find] Field {attributeName} has value: {fieldValue}");
                     
+                    // If expectedValue is an IExpression, evaluate it against the field value
+                    if (expectedValue is IExpression expression)
+                    {
+                        var result = MatchExpressionAgainstValue(expression, fieldValue);
+                        DebugLog($"[Find] Expression match result for attribute {attributeName}: {result}");
+                        return result;
+                    }
+                    
+                    // Fallback to simple value matching
                     return MatchesValue(fieldValue, expectedValue);
                 }
                 catch (Exception ex)
@@ -1444,6 +1580,88 @@ namespace PgQuery.NET.Analysis
                     DebugLog($"[Find] Error accessing field {attributeName}: {ex.Message}");
                     return false;
                 }
+            }
+            
+            private bool MatchExpressionAgainstValue(IExpression expression, object fieldValue)
+            {
+                // Handle different expression types when matching against a field value
+                if (expression is Find findExpr)
+                {
+                    // For Find expressions, match the pattern directly against the field value
+                    if (findExpr.IsWildcard())
+                    {
+                        DebugLog($"[Find] Wildcard matches any field value: {fieldValue}");
+                        return true;
+                    }
+                    
+                    if (findExpr.IsNil())
+                    {
+                        DebugLog($"[Find] Nil pattern matches null field value: {fieldValue == null}");
+                        return fieldValue == null;
+                    }
+                    
+                    // For regular Find, match against the target value using string comparison
+                    var targetString = findExpr._targetString;
+                    var fieldString = fieldValue?.ToString() ?? "";
+                    
+                    DebugLog($"[Find] Comparing field value '{fieldString}' with target '{targetString}'");
+                    
+                    // Direct string match
+                    if (string.Equals(fieldString, targetString, StringComparison.OrdinalIgnoreCase))
+                    {
+                        DebugLog($"[Find] Direct string match found");
+                        return true;
+                    }
+                    
+                    // Use the existing MatchesValue method for more complex matching
+                    return MatchesValue(fieldValue, targetString);
+                }
+                
+                if (expression is Not notExpr)
+                {
+                    // Negation: !value means NOT value
+                    var innerExpr = GetNotInnerExpression(notExpr);
+                    if (innerExpr != null)
+                    {
+                        var innerMatch = MatchExpressionAgainstValue(innerExpr, fieldValue);
+                        DebugLog($"[Find] Negation result: !({innerMatch}) = {!innerMatch}");
+                        return !innerMatch;
+                    }
+                }
+                
+                if (expression is Any anyExpr)
+                {
+                    // Set matching: {value1 value2 !value3} - any of the expressions can match
+                    var innerExpressions = GetAnyInnerExpressions(anyExpr);
+                    foreach (var innerExpr in innerExpressions)
+                    {
+                        if (MatchExpressionAgainstValue(innerExpr, fieldValue))
+                        {
+                            DebugLog($"[Find] Set pattern matched for field value: {fieldValue}");
+                            return true;
+                        }
+                    }
+                    DebugLog($"[Find] Set pattern did not match field value: {fieldValue}");
+                    return false;
+                }
+                
+                // For other expression types, fallback to string comparison
+                DebugLog($"[Find] Fallback string comparison for expression type: {expression.GetType().Name}");
+                return false;
+            }
+            
+            private IExpression GetNotInnerExpression(Not notExpr)
+            {
+                // Use reflection to access the private _expression field
+                var field = typeof(Not).GetField("_expression", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                return (IExpression)field?.GetValue(notExpr);
+            }
+            
+            private IExpression[] GetAnyInnerExpressions(Any anyExpr)
+            {
+                // Use reflection to access the private _expressions field
+                var field = typeof(Any).GetField("_expressions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                return (IExpression[])field?.GetValue(anyExpr) ?? new IExpression[0];
             }
         }
 
