@@ -20,29 +20,37 @@ A powerful CLI tool for searching and filtering SQL files using pattern expressi
 ## Installation
 
 ```bash
-# Build the project
-dotnet build src/GrepSQL/GrepSQL/GrepSQL.csproj
+# Build the native macOS binary (self-contained, no .NET runtime required)
+dotnet publish src/GrepSQL/GrepSQL/GrepSQL.csproj -c Release -o bin --self-contained true -r osx-arm64
 
-# Run directly
+# Or run in development mode
 dotnet run --project src/GrepSQL/GrepSQL/GrepSQL.csproj -- [options]
 
-# Or create a binary
-dotnet publish src/GrepSQL/GrepSQL/GrepSQL.csproj -o ./grepsql-bin
+# The native binary is located at ./bin/GrepSQL
+# Use the wrapper script: ./grepsql.sh
 ```
 
 ## Usage
 
 ```bash
+# New preferred syntax (like grep)
+grepsql PATTERN [files...] [options]
+
+# Legacy syntax (still supported)
 grepsql -p PATTERN [options]
 ```
 
-### Required Arguments
-- `-p, --pattern` - SQL pattern expression to match against
+### Arguments
+- `PATTERN` - SQL pattern expression to match against (first positional argument)
+- `files...` - SQL files to search through (remaining positional arguments)
+
+### Legacy Options (for backward compatibility)
+- `-p, --pattern` - SQL pattern expression to match against (alternative to positional)
+- `-f, --files` - SQL files to search through (alternative to positional)
 
 ### Input Options
-- `-f, --files` - SQL files to search through
 - `--from-sql` - Inline SQL to search instead of files
-- *(stdin)* - Read from stdin if no files or inline SQL specified
+- *(stdin)* - Read from stdin if no files specified
 
 ### Output Options
 - `--ast` - Print AST as JSON instead of SQL
@@ -63,63 +71,66 @@ grepsql -p PATTERN [options]
 ### Basic Statement Types
 ```bash
 # Find all SELECT statements
-grepsql -p "SelectStmt" -f queries.sql
+grepsql "SelectStmt" queries.sql
 
-# Find all INSERT statements
-grepsql -p "InsertStmt" -f *.sql
+# Find all INSERT statements (shell expands *.sql)
+grepsql "InsertStmt" *.sql
 
-# Find all UPDATE statements
-grepsql -p "UpdateStmt" -f database/migrations/*.sql
+# Find all UPDATE statements with glob patterns
+grepsql "UpdateStmt" database/migrations/*.sql
+
+# Also works with recursive patterns
+grepsql "SelectStmt" **/*.sql
 ```
 
 ### Field-Specific Patterns
 ```bash
 # Find SELECT statements with WHERE clauses
-grepsql -p "(SelectStmt (whereClause ...))" -f queries.sql
+grepsql "(SelectStmt (whereClause ...))" queries.sql
 
 # Find SELECT statements with both target list and FROM clause
-grepsql -p "(SelectStmt (targetList ...) (fromClause ...))" -f queries.sql
+grepsql "(SelectStmt (targetList ...) (fromClause ...))" queries.sql
 
 # Find UPDATE statements with WHERE clauses
-grepsql -p "(UpdateStmt (whereClause ...))" -f queries.sql
+grepsql "(UpdateStmt (whereClause ...))" queries.sql
 ```
 
 ### S-Expression Attribute Patterns
 ```bash
 # Find specific table references by name
-grepsql -p "(relname \"users\")" -f queries.sql
+grepsql "(relname \"users\")" queries.sql
 
 # Find specific column references
-grepsql -p "(colname \"id\")" -f queries.sql
+grepsql "(colname \"id\")" queries.sql
 
 # Find specific string constants
-grepsql -p "(sval \"admin\")" -f queries.sql
+grepsql "(sval \"admin\")" queries.sql
 ```
 
 ### Wildcard Patterns
 ```bash
 # Match any statement (useful for counting total statements)
-grepsql -p "..." -f queries.sql -c
+grepsql "..." queries.sql -c
 
 # Match any SELECT statement regardless of fields
-grepsql -p "(SelectStmt ...)" -f queries.sql
+grepsql "(SelectStmt ...)" queries.sql
 ```
 
 ## Examples
 
 ### Count all INSERT statements
 ```bash
-grepsql -p "InsertStmt" -f sample1.sql sample2.sql -c
+grepsql "InsertStmt" sample1.sql sample2.sql -c
 ```
 
 ### Find SELECT statements with WHERE clauses and show line numbers
 ```bash
-grepsql -p "(SelectStmt (whereClause ...))" -f queries.sql -n
+grepsql "(SelectStmt (whereClause ...))" queries.sql -n
 ```
 
 ### Debug pattern matching for inline SQL
 ```bash
-grepsql -p "(SelectStmt (targetList ...) (fromClause ...))" \
+grepsql "(SelectStmt (targetList ...) (fromClause ...))" \
         --from-sql "SELECT name, COUNT(*) FROM users GROUP BY name" \
         --debug
 ```
@@ -127,35 +138,35 @@ grepsql -p "(SelectStmt (targetList ...) (fromClause ...))" \
 ### View AST for UPDATE statements
 ```bash
 # JSON format
-grepsql -p "UpdateStmt" -f migrations.sql --ast
+grepsql "UpdateStmt" migrations.sql --ast
 
 # Pretty tree format with colors (clean mode)
-grepsql -p "UpdateStmt" -f migrations.sql --tree
+grepsql "UpdateStmt" migrations.sql --tree
 
 # Full tree with all details
-grepsql -p "UpdateStmt" -f migrations.sql --tree --tree-mode=full
+grepsql "UpdateStmt" migrations.sql --tree --tree-mode=full
 ```
 
 ### Search from stdin
 ```bash
-cat queries.sql | grepsql -p "SelectStmt"
+cat queries.sql | grepsql "SelectStmt"
 ```
 
 ### SQL Highlighting Examples
 ```bash
 # Highlight table names in ANSI colors (default)
-grepsql -p "(relname \"users\")" -f queries.sql --highlight
+grepsql "(relname \"users\")" queries.sql --highlight
 
 # Generate HTML with highlighted matches for documentation
-grepsql -p "(relname \"products\")" -f queries.sql --highlight --highlight-style html
+grepsql "(relname \"products\")" queries.sql --highlight --highlight-style html
 # Output: SELECT * FROM <mark>products</mark>
 
 # Generate Markdown with highlighted matches
-grepsql -p "(colname \"name\")" -f queries.sql --highlight --highlight-style markdown
+grepsql "(colname \"name\")" queries.sql --highlight --highlight-style markdown
 # Output: SELECT **name** FROM users
 
 # Show context lines around matches
-grepsql -p "(relname \"orders\")" -f complex.sql --highlight --context 2
+grepsql "(relname \"orders\")" complex.sql --highlight --context 2
 ```
 
 ## Pattern Language

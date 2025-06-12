@@ -254,10 +254,10 @@ namespace PgQuery.NET.Analysis
                 results.Add(node);
             }
 
-            // Enhanced DoStmt handling - detect and parse PL/pgSQL content
+            // Enhanced DoStmt handling - use protobuf instead of JSON
             if (node.Descriptor?.Name == "DoStmt")
             {
-                DebugLog($"[DoStmt] Found DoStmt node, processing PL/pgSQL content");
+                DebugLog($"[DoStmt] Found DoStmt node, processing PL/pgSQL content with protobuf");
                 var plpgsqlContent = ExtractSqlFromDoStmt(node);
                 
                 if (!string.IsNullOrEmpty(plpgsqlContent))
@@ -266,12 +266,68 @@ namespace PgQuery.NET.Analysis
                     {
                         DebugLog($"[DoStmt] Extracted PL/pgSQL content: {plpgsqlContent}");
                         
-                        // First try to extract SQL statements manually from the PL/pgSQL block
+                        // Use protobuf-based parsing instead of JSON
+                        var plpgsqlParseResult = PgQuery.ParsePlpgsqlProtobuf(plpgsqlContent);
+                        
+                        if (plpgsqlParseResult != null && plpgsqlParseResult.PlpgsqlFunctions != null)
+                        {
+                            DebugLog($"[DoStmt] Found {plpgsqlParseResult.PlpgsqlFunctions.Count} PL/pgSQL functions via protobuf");
+                            
+                            // Search within protobuf-based PL/pgSQL AST nodes directly
+                            foreach (var plpgsqlFunction in plpgsqlParseResult.PlpgsqlFunctions)
+                            {
+                                SearchRecursive(expression, plpgsqlFunction, results);
+                            }
+                            
+                            // Extract embedded SQL statements and parse them
+                            var embeddedSqlStatements = ExtractSqlStatementsFromPlpgsqlProtobuf(plpgsqlParseResult);
+                            
+                            if (embeddedSqlStatements.Count > 0)
+                            {
+                                DebugLog($"[DoStmt] Found {embeddedSqlStatements.Count} embedded SQL statements");
+                                var embeddedAsts = new List<ParseResult>();
+                                
+                                foreach (var sqlStatement in embeddedSqlStatements)
+                                {
+                                    if (!string.IsNullOrEmpty(sqlStatement))
+                                    {
+                                        try
+                                        {
+                                            DebugLog($"[DoStmt] Parsing embedded SQL: {sqlStatement.Substring(0, Math.Min(50, sqlStatement.Length))}...");
+                                            var embeddedAst = ParseSql(sqlStatement);
+                                            if (embeddedAst != null)
+                                            {
+                                                embeddedAsts.Add(embeddedAst);
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            DebugLog($"[DoStmt] Failed to parse embedded SQL: {ex.Message}");
+                                        }
+                                    }
+                                }
+                                
+                                // Search within embedded SQL ASTs
+                                if (embeddedAsts.Count > 0)
+                                {
+                                    var embeddedResults = new List<IMessage>();
+                                    SearchInAsts(expression, embeddedAsts, embeddedResults);
+                                    
+                                    // Add results directly without wrapper (unified approach)
+                                    results.AddRange(embeddedResults);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"[DoStmt] PL/pgSQL protobuf processing failed: {ex.Message}");
+                        // Fallback to manual SQL extraction if protobuf parsing fails
                         var extractedSqlStatements = ExtractSqlStatementsFromPlPgSqlBlock(plpgsqlContent);
                         
                         if (extractedSqlStatements.Count > 0)
                         {
-                            DebugLog($"[DoStmt] Found {extractedSqlStatements.Count} SQL statements via manual extraction");
+                            DebugLog($"[DoStmt] Fallback: Found {extractedSqlStatements.Count} SQL statements via manual extraction");
                             var embeddedAsts = new List<ParseResult>();
                             
                             foreach (var sqlStatement in extractedSqlStatements)
@@ -280,95 +336,26 @@ namespace PgQuery.NET.Analysis
                                 {
                                     try
                                     {
-                                        DebugLog($"[DoStmt] Parsing SQL: {sqlStatement.Substring(0, Math.Min(50, sqlStatement.Length))}...");
                                         var embeddedAst = ParseSql(sqlStatement);
                                         if (embeddedAst != null)
                                         {
                                             embeddedAsts.Add(embeddedAst);
                                         }
                                     }
-                                    catch (Exception ex)
+                                    catch (Exception ex2)
                                     {
-                                        DebugLog($"[DoStmt] Failed to parse extracted SQL: {ex.Message}");
+                                        DebugLog($"[DoStmt] Fallback failed to parse SQL: {ex2.Message}");
                                     }
                                 }
                             }
                             
-                            // Search within embedded SQL ASTs
                             if (embeddedAsts.Count > 0)
                             {
                                 var embeddedResults = new List<IMessage>();
                                 SearchInAsts(expression, embeddedAsts, embeddedResults);
-                                
-                                // Wrap results to indicate they came from DoStmt
-                                foreach (var result in embeddedResults)
-                                {
-                                    results.Add(new DoStmtWrapper(result, plpgsqlContent));
-                                }
+                                results.AddRange(embeddedResults);
                             }
                         }
-                        
-                        // Also try structured PL/pgSQL parsing if available
-                        try
-                        {
-                            var plpgsqlJson = PgQuery.ParsePlpgsql(plpgsqlContent);
-                            DebugLog($"[DoStmt] PL/pgSQL structured parsing succeeded");
-                            
-                            // Create a PL/pgSQL AST wrapper that can be searched
-                            var plpgsqlWrapper = new PlPgSqlWrapper(plpgsqlJson, plpgsqlContent);
-                            
-                            // Search within the PL/pgSQL content
-                            SearchInPlPgSql(expression, plpgsqlWrapper, results);
-                            
-                            // Also extract and parse any additional embedded SQL statements from JSON
-                            var jsonSqlStatements = ExtractSqlFromPlpgsqlJson(plpgsqlJson);
-                            
-                            if (jsonSqlStatements.Count > 0)
-                            {
-                                DebugLog($"[DoStmt] Found {jsonSqlStatements.Count} additional SQL statements from JSON");
-                                var additionalAsts = new List<ParseResult>();
-                                
-                                foreach (var sqlStatement in jsonSqlStatements)
-                                {
-                                    if (!string.IsNullOrEmpty(sqlStatement))
-                                    {
-                                        try
-                                        {
-                                            var embeddedAst = ParseSql(sqlStatement);
-                                            if (embeddedAst != null)
-                                            {
-                                                additionalAsts.Add(embeddedAst);
-                                            }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            DebugLog($"[DoStmt] Failed to parse JSON-extracted SQL: {ex.Message}");
-                                        }
-                                    }
-                                }
-                                
-                                // Search within additional embedded SQL ASTs
-                                if (additionalAsts.Count > 0)
-                                {
-                                    var additionalResults = new List<IMessage>();
-                                    SearchInAsts(expression, additionalAsts, additionalResults);
-                                    
-                                    // Wrap results to indicate they came from DoStmt
-                                    foreach (var result in additionalResults)
-                                    {
-                                        results.Add(new DoStmtWrapper(result, plpgsqlContent));
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            DebugLog($"[DoStmt] PL/pgSQL structured parsing failed (using manual extraction): {ex.Message}");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        DebugLog($"[DoStmt] PL/pgSQL processing failed: {ex.Message}");
                     }
                 }
             }
@@ -558,74 +545,6 @@ namespace PgQuery.NET.Analysis
             if (statement.Length < 10) return false;
             
             return true;
-        }
-
-        /// <summary>
-        /// Wrapper for PL/pgSQL JSON nodes to make them searchable.
-        /// </summary>
-        public class PlPgSqlJsonNode : IMessage
-        {
-            public System.Text.Json.JsonElement JsonElement { get; }
-            private readonly Google.Protobuf.Reflection.MessageDescriptor _descriptor;
-            
-            public PlPgSqlJsonNode(System.Text.Json.JsonElement jsonElement)
-            {
-                JsonElement = jsonElement;
-                _descriptor = CreatePlPgSqlJsonDescriptor();
-            }
-            
-            public Google.Protobuf.Reflection.MessageDescriptor Descriptor => _descriptor;
-            public int CalculateSize() => JsonElement.ToString().Length;
-            public void MergeFrom(Google.Protobuf.CodedInputStream input) { }
-            public void WriteTo(Google.Protobuf.CodedOutputStream output) { }
-            public IMessage Clone() => new PlPgSqlJsonNode(JsonElement);
-            public bool Equals(IMessage other) => other is PlPgSqlJsonNode node && node.JsonElement.Equals(JsonElement);
-            
-            private static Google.Protobuf.Reflection.MessageDescriptor CreatePlPgSqlJsonDescriptor()
-            {
-                // Create a descriptor that represents a PL/pgSQL JSON node
-                return Google.Protobuf.WellKnownTypes.Struct.Descriptor;
-            }
-        }
-
-        /// <summary>
-        /// Wrapper for PL/pgSQL content to make it searchable.
-        /// </summary>
-        public class PlPgSqlWrapper : IMessage
-        {
-            public string PlPgSqlJson { get; }
-            public string PlPgSqlContent { get; }
-            private readonly Google.Protobuf.Reflection.MessageDescriptor _descriptor;
-            
-            public PlPgSqlWrapper(string plpgsqlJson, string plpgsqlContent)
-            {
-                PlPgSqlJson = plpgsqlJson;
-                PlPgSqlContent = plpgsqlContent;
-                
-                // Create a fake descriptor for this wrapper
-                _descriptor = CreatePlPgSqlDescriptor();
-            }
-            
-            public Google.Protobuf.Reflection.MessageDescriptor Descriptor => _descriptor;
-            public int CalculateSize() => PlPgSqlContent.Length;
-            public void MergeFrom(Google.Protobuf.CodedInputStream input) { }
-            public void WriteTo(Google.Protobuf.CodedOutputStream output) { }
-            public IMessage Clone() => new PlPgSqlWrapper(PlPgSqlJson, PlPgSqlContent);
-            public bool Equals(IMessage other) => other is PlPgSqlWrapper wrapper && wrapper.PlPgSqlContent == PlPgSqlContent;
-            
-            private static Google.Protobuf.Reflection.MessageDescriptor CreatePlPgSqlDescriptor()
-            {
-                // Create a descriptor that represents a PL/pgSQL block
-                return Google.Protobuf.WellKnownTypes.Any.Descriptor;
-            }
-
-            /// <summary>
-            /// Get the node type name for pattern matching.
-            /// </summary>
-            public string GetNodeTypeName()
-            {
-                return "PlPgSqlBlock";
-            }
         }
 
         /// <summary>
@@ -1070,104 +989,136 @@ namespace PgQuery.NET.Analysis
         }
 
         /// <summary>
-        /// Extract SQL statements from PL/pgSQL JSON result using structured parsing.
+        /// Extract SQL statements from protobuf-based PL/pgSQL parse result.
         /// </summary>
-        private static List<string> ExtractSqlFromPlpgsqlJson(string plpgsqlJson)
+        private static List<string> ExtractSqlStatementsFromPlpgsqlProtobuf(PlpgsqlParseResult plpgsqlParseResult)
         {
             var sqlStatements = new List<string>();
             
             try
             {
-                using var doc = System.Text.Json.JsonDocument.Parse(plpgsqlJson);
-                
-                // Navigate the PL/pgSQL AST structure to find SQL statements
-                ExtractSqlFromJsonElement(doc.RootElement, sqlStatements);
+                            if (plpgsqlParseResult?.PlpgsqlFunctions == null)
+                return sqlStatements;
+            
+            DebugLog($"[ExtractSqlStatementsFromPlpgsqlProtobuf] Processing {plpgsqlParseResult.PlpgsqlFunctions.Count} functions");
+            
+            foreach (var function in plpgsqlParseResult.PlpgsqlFunctions)
+                {
+                    ExtractSqlFromPlpgsqlFunction(function, sqlStatements);
+                }
             }
             catch (Exception ex)
             {
-                DebugLog($"[ExtractSqlFromPlpgsqlJson] Failed to parse JSON: {ex.Message}");
+                DebugLog($"[ExtractSqlStatementsFromPlpgsqlProtobuf] Failed to extract SQL: {ex.Message}");
             }
             
+            DebugLog($"[ExtractSqlStatementsFromPlpgsqlProtobuf] Extracted {sqlStatements.Count} SQL statements");
             return sqlStatements;
         }
 
         /// <summary>
-        /// Recursively extract SQL statements from PL/pgSQL JSON elements.
+        /// Recursively extract SQL statements from a PL/pgSQL function protobuf node.
         /// </summary>
-        private static void ExtractSqlFromJsonElement(System.Text.Json.JsonElement element, List<string> sqlStatements)
+        private static void ExtractSqlFromPlpgsqlFunction(IMessage functionNode, List<string> sqlStatements)
         {
-            switch (element.ValueKind)
+            if (functionNode?.Descriptor == null) return;
+            
+            // Navigate the PL/pgSQL function structure to find SQL expressions
+            foreach (var field in functionNode.Descriptor.Fields.InFieldNumberOrder())
             {
-                case System.Text.Json.JsonValueKind.Object:
-                    foreach (var property in element.EnumerateObject())
+                try
+                {
+                    var fieldValue = field.Accessor.GetValue(functionNode);
+                    
+                    if (field.IsRepeated)
                     {
-                        // Look for SQL statement nodes in the PL/pgSQL AST
-                        if (IsSqlStatementProperty(property.Name))
+                        var list = (System.Collections.IList?)fieldValue;
+                        if (list != null)
                         {
-                            var sqlText = ExtractSqlTextFromProperty(property.Value);
-                            if (!string.IsNullOrEmpty(sqlText))
+                            foreach (var item in list)
                             {
-                                sqlStatements.Add(sqlText);
+                                if (item is IMessage childNode)
+                                {
+                                    ExtractSqlFromPlpgsqlNode(childNode, sqlStatements);
+                                }
                             }
                         }
-                        
-                        // Recursively search nested objects
-                        ExtractSqlFromJsonElement(property.Value, sqlStatements);
                     }
-                    break;
-                    
-                case System.Text.Json.JsonValueKind.Array:
-                    foreach (var item in element.EnumerateArray())
+                    else if (fieldValue is IMessage childNode)
                     {
-                        ExtractSqlFromJsonElement(item, sqlStatements);
+                        ExtractSqlFromPlpgsqlNode(childNode, sqlStatements);
                     }
-                    break;
+                    else if (fieldValue is string stringValue && IsParsableSqlStatement(stringValue))
+                    {
+                        // Direct SQL string found
+                        sqlStatements.Add(stringValue);
+                        DebugLog($"[ExtractSqlFromPlpgsqlFunction] Found SQL string: {stringValue.Substring(0, Math.Min(50, stringValue.Length))}...");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"[ExtractSqlFromPlpgsqlFunction] Error accessing field {field.Name}: {ex.Message}");
+                }
             }
         }
 
         /// <summary>
-        /// Check if a property name indicates it contains SQL statement information.
+        /// Extract SQL from a specific PL/pgSQL protobuf node.
         /// </summary>
-        private static bool IsSqlStatementProperty(string propertyName)
+        private static void ExtractSqlFromPlpgsqlNode(IMessage plpgsqlNode, List<string> sqlStatements)
         {
-            // Based on libpgquery PL/pgSQL AST structure, look for properties that contain SQL
-            return propertyName.Contains("stmt", StringComparison.OrdinalIgnoreCase) ||
-                   propertyName.Contains("query", StringComparison.OrdinalIgnoreCase) ||
-                   propertyName.Contains("sql", StringComparison.OrdinalIgnoreCase) ||
-                   propertyName.Equals("PLpgSQL_stmt_execsql", StringComparison.OrdinalIgnoreCase) ||
-                   propertyName.Equals("PLpgSQL_stmt_dynexecute", StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Extract SQL text from a JSON property value.
-        /// </summary>
-        private static string? ExtractSqlTextFromProperty(System.Text.Json.JsonElement element)
-        {
-            if (element.ValueKind == System.Text.Json.JsonValueKind.String)
-            {
-                return element.GetString();
-            }
+            if (plpgsqlNode?.Descriptor == null) return;
             
-            if (element.ValueKind == System.Text.Json.JsonValueKind.Object)
+            var nodeTypeName = plpgsqlNode.Descriptor.Name;
+            DebugLog($"[ExtractSqlFromPlpgsqlNode] Processing node type: {nodeTypeName}");
+            
+            // Look for SQL expression nodes (these typically contain the actual SQL)
+            if (nodeTypeName.Contains("PLpgSQL_expr", StringComparison.OrdinalIgnoreCase))
             {
-                // Look for common SQL text fields in PL/pgSQL AST nodes
-                if (element.TryGetProperty("sqlstmt", out var sqlstmt) && sqlstmt.ValueKind == System.Text.Json.JsonValueKind.String)
+                // This is a SQL expression node - extract the query
+                var queryField = FindField(plpgsqlNode.Descriptor, "query");
+                if (queryField != null)
                 {
-                    return sqlstmt.GetString();
-                }
-                
-                if (element.TryGetProperty("query", out var query) && query.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    return query.GetString();
-                }
-                
-                if (element.TryGetProperty("sql", out var sql) && sql.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    return sql.GetString();
+                    var query = queryField.Accessor.GetValue(plpgsqlNode) as string;
+                    if (!string.IsNullOrEmpty(query) && IsParsableSqlStatement(query))
+                    {
+                        sqlStatements.Add(query);
+                        DebugLog($"[ExtractSqlFromPlpgsqlNode] Found SQL from {nodeTypeName}: {query.Substring(0, Math.Min(50, query.Length))}...");
+                    }
                 }
             }
             
-            return null;
+            // Recursively process child nodes
+            foreach (var field in plpgsqlNode.Descriptor.Fields.InFieldNumberOrder())
+            {
+                try
+                {
+                    var fieldValue = field.Accessor.GetValue(plpgsqlNode);
+                    
+                    if (field.IsRepeated)
+                    {
+                        var list = (System.Collections.IList?)fieldValue;
+                        if (list != null)
+                        {
+                            foreach (var item in list)
+                            {
+                                if (item is IMessage childNode)
+                                {
+                                    ExtractSqlFromPlpgsqlNode(childNode, sqlStatements);
+                                }
+                            }
+                        }
+                    }
+                    else if (fieldValue is IMessage childNode)
+                    {
+                        ExtractSqlFromPlpgsqlNode(childNode, sqlStatements);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"[ExtractSqlFromPlpgsqlNode] Error accessing field {field.Name}: {ex.Message}");
+                }
+            }
         }
 
         /// <summary>
@@ -2124,7 +2075,7 @@ namespace PgQuery.NET.Analysis
                 
                 if (includeDoStmt && parseResult?.ParseTree?.Stmts != null)
                 {
-                    // Process DoStmt nodes to include their PL/pgSQL content
+                    // Process DoStmt nodes to include their PL/pgSQL content using protobuf
                     foreach (var stmt in parseResult.ParseTree.Stmts)
                     {
                         if (stmt?.Stmt != null)
@@ -2144,7 +2095,7 @@ namespace PgQuery.NET.Analysis
         }
 
         /// <summary>
-        /// Process DoStmt nodes recursively to include PL/pgSQL content.
+        /// Process DoStmt nodes recursively to include PL/pgSQL content using protobuf.
         /// </summary>
         private static void ProcessDoStmtForTree(IMessage node)
         {
@@ -2158,16 +2109,15 @@ namespace PgQuery.NET.Analysis
                 {
                     try
                     {
-                        // Parse the PL/pgSQL content
-                        var plpgsqlJson = PgQuery.ParsePlpgsql(plpgsqlContent);
+                        // Parse the PL/pgSQL content using protobuf instead of JSON
+                        var plpgsqlParseResult = PgQuery.ParsePlpgsqlProtobuf(plpgsqlContent);
                         
                         // Store the parsed content for tree visualization
-                        // This would typically be stored as metadata or in a wrapper
-                        DebugLog($"[ProcessDoStmtForTree] Parsed PL/pgSQL content for tree: {plpgsqlJson.Length} chars");
+                        DebugLog($"[ProcessDoStmtForTree] Parsed PL/pgSQL content for tree using protobuf: {plpgsqlParseResult.PlpgsqlFunctions.Count} functions");
                     }
                     catch (Exception ex)
                     {
-                        DebugLog($"[ProcessDoStmtForTree] Failed to parse PL/pgSQL: {ex.Message}");
+                        DebugLog($"[ProcessDoStmtForTree] Failed to parse PL/pgSQL with protobuf: {ex.Message}");
                     }
                 }
             }
@@ -2201,79 +2151,6 @@ namespace PgQuery.NET.Analysis
                         }
                     }
                 }
-            }
-        }
-
-        /// <summary>
-        /// Search within PL/pgSQL content.
-        /// </summary>
-        private static void SearchInPlPgSql(IExpression expression, PlPgSqlWrapper plpgsqlWrapper, List<IMessage> results)
-        {
-            // Check if the expression matches the PL/pgSQL wrapper itself
-            if (expression.Match(plpgsqlWrapper))
-            {
-                results.Add(plpgsqlWrapper);
-            }
-            
-            // Parse the JSON and create searchable nodes from the PL/pgSQL AST
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(plpgsqlWrapper.PlPgSqlJson);
-                
-                // Create virtual nodes from the PL/pgSQL AST for searching
-                var plpgsqlNodes = CreateSearchableNodesFromPlPgSqlJson(doc.RootElement);
-                
-                foreach (var node in plpgsqlNodes)
-                {
-                    if (expression.Match(node))
-                    {
-                        results.Add(node);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"[SearchInPlPgSql] Failed to parse PL/pgSQL JSON for searching: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Create searchable nodes from PL/pgSQL JSON AST.
-        /// </summary>
-        private static List<IMessage> CreateSearchableNodesFromPlPgSqlJson(System.Text.Json.JsonElement rootElement)
-        {
-            var nodes = new List<IMessage>();
-            
-            CreateSearchableNodesRecursive(rootElement, nodes);
-            
-            return nodes;
-        }
-
-        /// <summary>
-        /// Recursively create searchable nodes from PL/pgSQL JSON elements.
-        /// </summary>
-        private static void CreateSearchableNodesRecursive(System.Text.Json.JsonElement element, List<IMessage> nodes)
-        {
-            switch (element.ValueKind)
-            {
-                case System.Text.Json.JsonValueKind.Object:
-                    // Create a wrapper node for this JSON object
-                    var wrapperNode = new PlPgSqlJsonNode(element);
-                    nodes.Add(wrapperNode);
-                    
-                    // Recursively process nested objects
-                    foreach (var property in element.EnumerateObject())
-                    {
-                        CreateSearchableNodesRecursive(property.Value, nodes);
-                    }
-                    break;
-                    
-                case System.Text.Json.JsonValueKind.Array:
-                    foreach (var item in element.EnumerateArray())
-                    {
-                        CreateSearchableNodesRecursive(item, nodes);
-                    }
-                    break;
             }
         }
     }

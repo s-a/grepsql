@@ -15,10 +15,16 @@ namespace GrepSQL
 {
     public class Options
     {
-        [Option('p', "pattern", Required = true, HelpText = "SQL pattern expression to match against")]
-        public string Pattern { get; set; } = "";
+        [Value(0, MetaName = "pattern", Required = false, HelpText = "SQL pattern expression to match against")]
+        public string? PositionalPattern { get; set; }
 
-        [Option('f', "files", HelpText = "SQL files to search through")]
+        [Value(1, MetaName = "files", HelpText = "SQL files to search through")]
+        public IEnumerable<string> PositionalFiles { get; set; } = new List<string>();
+
+        [Option('p', "pattern", Required = false, HelpText = "SQL pattern expression to match against (alternative to positional)")]
+        public string? Pattern { get; set; }
+
+        [Option('f', "files", HelpText = "SQL files to search through (alternative to positional)")]
         public IEnumerable<string> Files { get; set; } = new List<string>();
 
         [Option("from-sql", HelpText = "Inline SQL to search instead of files")]
@@ -90,17 +96,42 @@ namespace GrepSQL
         {
             try
             {
+                // Determine pattern (positional takes precedence)
+                var pattern = !string.IsNullOrEmpty(options.PositionalPattern) 
+                    ? options.PositionalPattern 
+                    : options.Pattern;
+
+                if (string.IsNullOrEmpty(pattern))
+                {
+                    Console.Error.WriteLine("Error: Pattern is required. Provide it as first argument or use -p/--pattern option.");
+                    return 1;
+                }
+
+                // Determine files (positional takes precedence, combine if both provided)
+                var allFiles = new List<string>();
+                if (options.PositionalFiles.Any())
+                {
+                    allFiles.AddRange(options.PositionalFiles);
+                }
+                if (options.Files.Any())
+                {
+                    allFiles.AddRange(options.Files);
+                }
+
+                // Expand glob patterns in file paths
+                var expandedFiles = ExpandGlobPatterns(allFiles);
+
                 var matches = new List<SqlMatch>();
 
                 if (!string.IsNullOrEmpty(options.FromSql))
                 {
                     // Process inline SQL
-                    ProcessSql("(inline)", options.FromSql, options.Pattern, options.Debug, options.Verbose, matches);
+                    ProcessSql("(inline)", options.FromSql, pattern, options.Debug, options.Verbose, matches);
                 }
-                else if (options.Files.Any())
+                else if (expandedFiles.Any())
                 {
                     // Process files
-                    foreach (var file in options.Files)
+                    foreach (var file in expandedFiles)
                     {
                         if (!File.Exists(file))
                         {
@@ -111,7 +142,7 @@ namespace GrepSQL
                         try
                         {
                             var content = File.ReadAllText(file);
-                            ProcessSql(file, content, options.Pattern, options.Debug, options.Verbose, matches);
+                            ProcessSql(file, content, pattern, options.Debug, options.Verbose, matches);
                         }
                         catch (Exception ex)
                         {
@@ -123,7 +154,7 @@ namespace GrepSQL
                 {
                     // Read from stdin
                     var content = Console.In.ReadToEnd();
-                    ProcessSql("(stdin)", content, options.Pattern, options.Debug, options.Verbose, matches);
+                    ProcessSql("(stdin)", content, pattern, options.Debug, options.Verbose, matches);
                 }
 
                 // Output results
@@ -150,6 +181,63 @@ namespace GrepSQL
                 }
                 return 2;
             }
+        }
+
+        static List<string> ExpandGlobPatterns(IEnumerable<string> patterns)
+        {
+            var expandedFiles = new List<string>();
+            
+            foreach (var pattern in patterns)
+            {
+                if (string.IsNullOrEmpty(pattern)) continue;
+                
+                // Check if the pattern contains glob characters
+                if (pattern.Contains('*') || pattern.Contains('?'))
+                {
+                    try
+                    {
+                        // Handle different glob patterns
+                        if (pattern.StartsWith("**"))
+                        {
+                            // Recursive glob pattern like **/*.sql
+                            var searchPattern = pattern.Substring(pattern.IndexOf('/') + 1);
+                            var files = Directory.GetFiles(".", searchPattern, SearchOption.AllDirectories);
+                            expandedFiles.AddRange(files.Select(f => Path.GetRelativePath(".", f)));
+                        }
+                        else if (pattern.Contains('/'))
+                        {
+                            // Pattern with directory like dir/*.sql
+                            var directory = Path.GetDirectoryName(pattern) ?? ".";
+                            var searchPattern = Path.GetFileName(pattern);
+                            
+                            if (Directory.Exists(directory))
+                            {
+                                var files = Directory.GetFiles(directory, searchPattern, SearchOption.TopDirectoryOnly);
+                                expandedFiles.AddRange(files.Select(f => Path.GetRelativePath(".", f)));
+                            }
+                        }
+                        else
+                        {
+                            // Simple pattern like *.sql
+                            var files = Directory.GetFiles(".", pattern, SearchOption.TopDirectoryOnly);
+                            expandedFiles.AddRange(files.Select(f => Path.GetRelativePath(".", f)));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"Warning: Could not expand glob pattern '{pattern}': {ex.Message}");
+                        // If glob expansion fails, treat it as a literal filename
+                        expandedFiles.Add(pattern);
+                    }
+                }
+                else
+                {
+                    // Not a glob pattern, add as-is
+                    expandedFiles.Add(pattern);
+                }
+            }
+            
+            return expandedFiles.Distinct().ToList();
         }
 
         static void ProcessSql(string fileName, string content, string pattern, bool debug, bool verbose, List<SqlMatch> matches)
@@ -200,23 +288,26 @@ namespace GrepSQL
                                         var extractedSql = extractedSqlProperty.GetValue(result) as string ?? sql;
                                         var innerNode = innerNodeProperty.GetValue(result) as IMessage;
                                         
-                                        var ast = SqlPatternMatcher.ParseSql(extractedSql);
-                                        var matchingPath = new HashSet<IMessage> { innerNode };
-                                        var matchingNodes = new List<IMessage> { innerNode };
-                                        
-                                        string details = debug ? "Found match inside DO statement" : "";
-                                        
-                                        matches.Add(new SqlMatch
+                                        if (innerNode != null)
                                         {
-                                            FileName = fileName,
-                                            Sql = extractedSql,
-                                            Ast = innerNode,
-                                            LineNumber = sqlStatements[i].LineNumber,
-                                            MatchDetails = details,
-                                            MatchingPath = matchingPath,
-                                            MatchingNodes = matchingNodes,
-                                            Captures = captures
-                                        });
+                                            var ast = SqlPatternMatcher.ParseSql(extractedSql);
+                                            var matchingPath = new HashSet<IMessage> { innerNode };
+                                            var matchingNodes = new List<IMessage> { innerNode };
+                                        
+                                            string details = debug ? "Found match inside DO statement" : "";
+                                            
+                                            matches.Add(new SqlMatch
+                                            {
+                                                FileName = fileName,
+                                                Sql = extractedSql,
+                                                Ast = innerNode,
+                                                LineNumber = sqlStatements[i].LineNumber,
+                                                MatchDetails = details,
+                                                MatchingPath = matchingPath,
+                                                MatchingNodes = matchingNodes,
+                                                Captures = captures
+                                            });
+                                        }
                                     }
                                 }
                                 else

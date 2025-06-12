@@ -2,6 +2,33 @@
 
 A comprehensive .NET wrapper for libpg_query, providing PostgreSQL query parsing and advanced SQL pattern matching capabilities.
 
+## 📦 Quick Install
+
+### Pre-built Binaries (Recommended)
+Download ready-to-use binaries from [GitHub Releases](https://github.com/jonatas/pgquery-dotnet/releases):
+
+- **Linux (x64)**: `grepsql-linux-x64.tar.gz`
+- **macOS (Intel)**: `grepsql-osx-x64.tar.gz` 
+- **macOS (Apple Silicon)**: `grepsql-osx-arm64.tar.gz`
+- **Windows (x64)**: `grepsql-win-x64.zip`
+
+```bash
+# Download and extract (example for Linux)
+wget https://github.com/jonatas/pgquery-dotnet/releases/latest/download/grepsql-linux-x64.tar.gz
+tar -xzf grepsql-linux-x64.tar.gz
+chmod +x GrepSQL
+
+# Use immediately
+./GrepSQL "SelectStmt" *.sql --highlight
+```
+
+> **🚀 Automated Releases**: Cross-platform binaries are automatically built and released when changes are merged to the main branch or when version tags are pushed.
+
+### NuGet Package (.NET Library)
+```bash
+dotnet add package PgQuery.NET
+```
+
 ## Features
 
 ### 1. 🔍 **GrepSQL - Command Line Tool**
