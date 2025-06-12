@@ -61,13 +61,13 @@ namespace PgQuery.NET.Analysis
             |
             \?                    # maybe expression
             |
+            \$                    # capture operator (must come before word pattern)
+            |
             [\d\w_]+[=\!\?]?     # method names or numbers
             |
             \(|\)                 # parens for tuples
             |
             \{|\}                 # curly brackets for Any
-            |
-            \$                    # capture
             |
             \#\w[\d\w_]+[\\!\?]?  # custom method call
             |
@@ -1687,8 +1687,31 @@ namespace PgQuery.NET.Analysis
             {
                 DebugLog($"[All] Matching All expression with {_expressions.Length} parts against node: {node?.Descriptor?.Name}");
                 
-                // First try base Find logic for attribute patterns and simple matching
-                if (base.Match(node)) return true;
+                // Log the types of expressions we have
+                for (int i = 0; i < _expressions.Length; i++)
+                {
+                    DebugLog($"[All] Expression {i}: {_expressions[i].GetType().Name}");
+                }
+                
+                // Check if we have any Capture expressions - if so, we need to call them individually
+                bool hasCaptureExpressions = _expressions.Any(expr => expr is Capture);
+                DebugLog($"[All] Has capture expressions: {hasCaptureExpressions}");
+                
+                // Only try base Find logic if we don't have capture expressions
+                if (!hasCaptureExpressions)
+                {
+                    DebugLog($"[All] Trying base Find logic first (no captures)");
+                    if (base.Match(node)) 
+                    {
+                        DebugLog($"[All] Base Find logic matched, returning true");
+                        return true;
+                    }
+                    DebugLog($"[All] Base Find logic did not match");
+                }
+                else
+                {
+                    DebugLog($"[All] Skipping base Find logic due to capture expressions");
+                }
                 
                 // Handle patterns that start with Until expressions (ellipsis patterns)
                 // For patterns like (... something) or (SelectStmt ... something)
@@ -1701,6 +1724,7 @@ namespace PgQuery.NET.Analysis
                         // If we have expressions before the Until, they must match first
                         for (int j = 0; j < i; j++)
                         {
+                            DebugLog($"[All] Checking expression {j} before Until");
                             if (!_expressions[j].Match(node))
                             {
                                 DebugLog($"[All] Expression {j} failed to match before Until");
@@ -1718,6 +1742,7 @@ namespace PgQuery.NET.Analysis
                 if (_expressions.Length == 2 && 
                     _expressions[1] is Find ellipsisFind && ellipsisFind.IsEllipsis())
                 {
+                    DebugLog($"[All] Detected 2-part ellipsis pattern");
                     // First expression should match the current node
                     if (!_expressions[0].Match(node)) return false;
                     
@@ -1726,10 +1751,18 @@ namespace PgQuery.NET.Analysis
                 }
                 
                 // Standard All behavior: all expressions must match the same node
+                DebugLog($"[All] Using standard All behavior - checking all {_expressions.Length} expressions");
                 foreach (var expr in _expressions)
                 {
-                    if (!expr.Match(node)) return false;
+                    DebugLog($"[All] Checking expression: {expr.GetType().Name}");
+                    if (!expr.Match(node)) 
+                    {
+                        DebugLog($"[All] Expression {expr.GetType().Name} failed to match");
+                        return false;
+                    }
+                    DebugLog($"[All] Expression {expr.GetType().Name} matched successfully");
                 }
+                DebugLog($"[All] All expressions matched successfully");
                 return true;
             }
         }
@@ -1748,18 +1781,26 @@ namespace PgQuery.NET.Analysis
 
             public bool Match(IMessage node)
             {
+                DebugLog($"[Capture] Attempting to match capture '{_captureName}' against node: {node?.Descriptor?.Name}");
+                
                 if (_expression.Match(node))
                 {
+                    DebugLog($"[Capture] Expression matched! Capturing node for '{_captureName}'");
+                    
                     if (!string.IsNullOrEmpty(_captureName))
                     {
+                        DebugLog($"[Capture] Adding named capture: {_captureName}");
                         AddNamedCapture(_captureName, node);
                     }
                     else
                     {
+                        DebugLog($"[Capture] Adding unnamed capture");
                         AddCapture(node);
                     }
                     return true;
                 }
+                
+                DebugLog($"[Capture] Expression did not match for '{_captureName}'");
                 return false;
             }
         }
@@ -1997,9 +2038,9 @@ namespace PgQuery.NET.Analysis
             private IExpression ParseCapture()
             {
                 // Handle different capture patterns:
-                // $() -> capture full node
-                // $exp -> capture the result of expression exp
-                // In patterns like ($exp $...) each $ captures independently
+                // $() -> capture full node (unnamed)
+                // $name -> capture with name "name" 
+                // $(expr) -> capture the result of expression expr (unnamed)
                 
                 if (_tokens.Count > 0 && _tokens.Peek() == "(")
                 {
@@ -2007,12 +2048,12 @@ namespace PgQuery.NET.Analysis
                     if (_tokens.Count > 0 && _tokens.Peek() == ")")
                     {
                         _tokens.Dequeue(); // consume the ")"
-                        // $() - capture full node
+                        // $() - capture full node (unnamed)
                         return new Capture(LITERALS["_"]);
                     }
                     else
                     {
-                        // $(...) - capture the result of the expressions inside parentheses
+                        // $(...) - capture the result of the expressions inside parentheses (unnamed)
                         var innerExpressions = ParseUntil(")");
                         if (innerExpressions.Length == 1)
                         {
@@ -2024,11 +2065,21 @@ namespace PgQuery.NET.Analysis
                         }
                     }
                 }
+                else if (_tokens.Count > 0)
+                {
+                    // $name - capture with name
+                    var captureName = _tokens.Dequeue();
+                    DebugLog($"[ParseCapture] Extracted capture name: '{captureName}'");
+                    
+                    // The capture should capture whatever expression follows
+                    // For patterns like ($name (relname $name)), the first $name captures the whole match
+                    // and the second $name captures the relname value
+                    return new Capture(LITERALS["_"], captureName);
+                }
                 else
                 {
-                    // $exp - capture the result of the next expression
-                    var nextExpression = Parse();
-                    return new Capture(nextExpression);
+                    // $ with no following token - capture everything
+                    return new Capture(LITERALS["_"]);
                 }
             }
 

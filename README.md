@@ -48,6 +48,9 @@ Search through SQL files with powerful pattern matching:
 
 # Show AST structure
 ./grepsql.sh -p "SelectStmt" --from-sql "SELECT id FROM users" --tree
+
+# Extract captured values only ✨ NEW
+./grepsql.sh -p "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only
 ```
 
 ### 2. 🧠 **Advanced SQL Pattern Matching**
@@ -144,18 +147,29 @@ SqlPatternMatcher.Matches("(funcname {count sum avg})", sql); // Specific functi
 ./grepsql.sh -p "(SelectStmt ... (relname !system_tables))" -f queries.sql --highlight
 ```
 
-#### **Capture and Search**
+#### **Capture and Search** ✨ **ENHANCED**
 ```csharp
 // Capture nodes for later analysis
 var sql = "SELECT name FROM users WHERE age > 18";
-var pattern = "(SelectStmt ... (whereClause $cond(A_Expr ...)))";
-SqlPatternMatcher.Matches(pattern, sql);
+var pattern = "($table (relname _))";
+var results = SqlPatternMatcher.Search(pattern, sql);
 var captures = SqlPatternMatcher.GetCaptures();
-var condition = captures["cond"][0]; // The A_Expr node
+var tableNode = captures["table"][0]; // The captured table node
+
+// Multiple captures in one pattern
+var complexPattern = "(SelectStmt $stmt ... (RangeVar (relname $table)) ... (whereClause $condition))";
+SqlPatternMatcher.Search(complexPattern, sql);
+var allCaptures = SqlPatternMatcher.GetCaptures();
+var statement = allCaptures["stmt"][0];     // The SelectStmt
+var tableName = allCaptures["table"][0];    // The table name
+var whereClause = allCaptures["condition"][0]; // The WHERE condition
 
 // Search for all matches
 var matches = SqlPatternMatcher.Search("(A_Const (sval ...))", sql);
 // Returns all string constants in the query
+
+// Clear captures between searches
+SqlPatternMatcher.ClearCaptures();
 ```
 
 ### 3. ⚙️ **Core Query Parsing**
@@ -427,18 +441,136 @@ Unlike simple string matching, our patterns navigate the **Abstract Syntax Tree 
 (SelectStmt ... (RangeVar (relname "users")))
 ```
 
-### **6. Capture Patterns: `$variable`**
+### **6. Capture Patterns: `$variable`** ✨ **NEW**
 
-Capture matched nodes for later analysis:
+Capture matched nodes for later analysis and extraction:
 
+#### **Basic Capture Syntax**
 ```bash
-# Basic capture
-(SelectStmt $stmt ...)                    # Capture the SELECT statement
-(A_Const (ival $number))                  # Capture integer value
+# Named captures - store with a specific name
+$name                                     # Capture with name "name"
+$table                                    # Capture with name "table"
+$condition                                # Capture with name "condition"
 
-# Named captures for analysis
-(SelectStmt ... (RangeVar (relname $table))) # Capture table name
-($select_stmt ... (whereClause $condition))  # Capture statement and condition
+# Unnamed captures - store in default group
+$()                                       # Capture without specific name
+```
+
+#### **Capture Examples**
+```bash
+# Basic node capture
+(SelectStmt $stmt ...)                   # Capture the entire SELECT statement
+(A_Const (ival $number))                 # Capture integer constant value
+(RangeVar (relname $table))              # Capture table name node
+
+# Wildcard captures - capture any matching node
+($match _)                               # Capture any single node
+($table (relname _))                     # Capture any table reference
+
+# Multiple captures in one pattern
+($stmt SelectStmt) ($table (relname _))  # Capture both statement and table
+
+# Specific value captures
+($found (relname "users"))               # Capture when table is specifically "users"
+($admin (sval "admin"))                  # Capture when string is "admin"
+```
+
+#### **Command Line Usage**
+```bash
+# Extract captured values with --captures-only flag
+./grepsql.sh -p "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only
+# Output: [table]: Node
+
+# Multiple captures
+./grepsql.sh -p "(\$stmt _) (\$table (relname _))" --from-sql "SELECT * FROM products" --captures-only
+# Output: [stmt]: Node
+
+# Unnamed captures
+./grepsql.sh -p "(\$() (relname test))" --from-sql "SELECT * FROM test" --captures-only
+# Output: Node
+
+# Debug capture parsing
+./grepsql.sh -p "(\$debug (relname _))" --from-sql "SELECT * FROM debug_table" --debug
+# Shows detailed parsing and capture process
+```
+
+#### **C# API Usage**
+```csharp
+// Search with captures
+var sql = "SELECT name FROM users WHERE age > 18";
+var results = SqlPatternMatcher.Search("($table (relname _))", sql);
+
+// Get captured nodes
+var captures = SqlPatternMatcher.GetCaptures();
+foreach (var captureGroup in captures)
+{
+    Console.WriteLine($"Capture '{captureGroup.Key}': {captureGroup.Value.Count} items");
+    foreach (var node in captureGroup.Value)
+    {
+        Console.WriteLine($"  - {node.Descriptor?.Name}");
+    }
+}
+
+// Clear captures between searches
+SqlPatternMatcher.ClearCaptures();
+
+// Named captures for complex analysis
+var pattern = "(SelectStmt $stmt ... (RangeVar (relname $table)) ... (whereClause $condition))";
+SqlPatternMatcher.Search(pattern, sql);
+var captures = SqlPatternMatcher.GetCaptures();
+var statement = captures["stmt"][0];     // The SelectStmt node
+var tableName = captures["table"][0];    // The table name node  
+var whereClause = captures["condition"][0]; // The WHERE condition
+```
+
+#### **Advanced Capture Patterns**
+```bash
+# Capture with ellipsis navigation
+(SelectStmt ... ($table (relname _)))    # Find and capture table deep in SELECT
+
+# Capture with logical operators
+($const (A_Const {ival sval}))           # Capture any constant (int or string)
+($safe_table (relname !{temp_table system_log})) # Capture non-system tables
+
+# Capture with negation
+($non_admin (sval !"admin"))             # Capture non-admin string values
+
+# Complex multi-level captures
+(SelectStmt $stmt ... 
+  (fromClause ($from_table (relname _))) 
+  (whereClause ($condition (A_Expr ...))))  # Capture statement, table, and condition
+```
+
+#### **Capture Use Cases**
+```bash
+# Security Analysis - Find hardcoded credentials
+./grepsql.sh -p "(\$credential (sval _))" -f "**/*.sql" --captures-only
+
+# Performance Analysis - Extract table access patterns  
+./grepsql.sh -p "(SelectStmt ... (\$table (relname _)))" -f queries.sql --captures-only
+
+# Code Quality - Find magic numbers
+./grepsql.sh -p "(\$magic_number (ival _))" -f "**/*.sql" --captures-only
+
+# Migration Planning - Extract schema references
+./grepsql.sh -p "(\$schema_ref (schemaname _))" -f migration.sql --captures-only
+```
+
+#### **Capture Output Formats**
+```bash
+# Default format shows capture names and node types
+[table]: Node
+[condition]: Node
+
+# When only default captures exist, names are omitted
+Node
+Node
+
+# Multiple items in same capture group
+[tables]: 3 items
+  - Node
+  - Node  
+  - Node
 ```
 
 ### **7. Advanced Patterns**
@@ -759,7 +891,7 @@ dotnet test tests/PgQuery.NET.Tests/ --filter "SqlPatternMatcherTests"
 
 **Test Coverage:**
 - ✅ 28/28 SqlPatternMatcher tests passing (100%)
-- ✅ All major pattern types (ellipsis, maybe, not, any, capture)
+- ✅ All major pattern types (ellipsis, maybe, not, any, **capture** ✨)
 - ✅ Complex nested queries and CTEs
 - ✅ Enum value matching and literals
 - ✅ Deep AST navigation with ellipsis patterns
@@ -778,7 +910,7 @@ Our SqlPatternMatcher implements a sophisticated pattern matching system:
 1. **Recursive AST Traversal** - Navigate any depth with ellipsis patterns
 2. **Smart Field Detection** - PascalCase vs camelCase routing
 3. **Flexible Value Matching** - Literals, enums, and primitives
-4. **Capture System** - Extract matched nodes for analysis
+4. **Capture System** ✨ - Extract matched nodes for analysis with `$name` syntax
 5. **Negation Support** - Complex logical combinations
 6. **Enhanced DoStmt Processing** - Dynamic PL/pgSQL content extraction and parsing
 
