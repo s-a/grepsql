@@ -18,10 +18,7 @@ namespace PgQuery.NET.Analysis
     /// </summary>
     public static class SqlPatternMatcher
     {
-        // Performance: Expression compilation cache to avoid re-parsing patterns
-        private static readonly ConcurrentDictionary<string, IExpression> _expressionCache = new();
-        private static readonly object _cacheLock = new object();
-        private const int MAX_CACHE_SIZE = 1000; // Prevent memory leaks
+        // Direct expression compilation without caching
         
         // Performance: Thread-local storage for captures to avoid locking
         private static readonly ThreadLocal<List<IMessage>> _captures = new(() => new List<IMessage>());
@@ -78,13 +75,10 @@ namespace PgQuery.NET.Analysis
             %\d                   # bind extra arguments to the expression
         ", RegexOptions.IgnorePatternWhitespace | RegexOptions.Compiled);
 
-        // Performance: Literal cache for common patterns
-        private static readonly Dictionary<string, IExpression> LITERALS = new Dictionary<string, IExpression>
-        {
-            ["_"] = new Find("_"),      // Match any node
-            ["nil"] = new Find("nil"),  // Match null/empty nodes
-            ["..."] = new Find("...")   // Match nodes with children
-        };
+        // Common  expressions (no caching, created fresh each time)
+        
+        // Create Something instance for $_ captures
+        private static readonly Something SOMETHING_INSTANCE = new Something();
 
         /// <summary>
         /// Match a pattern against SQL, with performance optimizations.
@@ -103,7 +97,7 @@ namespace PgQuery.NET.Analysis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[SqlPatternMatcher] Match failed: {ex.Message}");
+                DebugLog($"[SqlPatternMatcher] Match failed: {ex.Message}");
                 return false;
             }
         }
@@ -120,36 +114,25 @@ namespace PgQuery.NET.Analysis
             try
             {
                 _debugEnabled = debug;
-                
-                if (debug)
-                {
-                    Console.WriteLine($"[SqlPatternMatcher] Searching for pattern: {pattern}");
-                }
+                DebugLog($"[SqlPatternMatcher] Searching for pattern: {pattern}");
                 
                 ClearCaptures();
                 
-                var expression = GetCachedExpression(pattern);
+                var expression = CompileExpression(pattern);
                 var ast = PgQuery.Parse(sql);
                 var results = new List<IMessage>();
                 
                 // Search across all statements in the parse tree
                 SearchInAsts(expression, new[] { ast }, results);
                 
-                if (debug)
-                {
-                    Console.WriteLine($"[SqlPatternMatcher] Found {results.Count} matches");
-                }
+                DebugLog($"[SqlPatternMatcher] Found {results.Count} matches");
                 
                 return results;
             }
             catch (Exception ex)
             {
                 var errorMessage = $"Search failed: {ex.Message}";
-                if (debug)
-                {
-                    Console.WriteLine($"[SqlPatternMatcher] {errorMessage}");
-                }
-                Console.WriteLine($"[SqlPatternMatcher] {errorMessage}");
+                DebugLog($"[SqlPatternMatcher] {errorMessage}");
                 return new List<IMessage>();
             }
         }
@@ -166,22 +149,18 @@ namespace PgQuery.NET.Analysis
             try
             {
                 _debugEnabled = debug;
-                
-                if (debug)
-                {
-                    Console.WriteLine($"[SqlPatternMatcher] Searching for pattern: {pattern} across multiple ASTs");
-                }
+                DebugLog($"[SqlPatternMatcher] Searching for pattern: {pattern} across multiple ASTs");
                 
                 ClearCaptures();
                 
-                var expression = GetCachedExpression(pattern);
+                var expression = CompileExpression(pattern);
                 var results = new List<IMessage>();
                 
                 SearchInAsts(expression, asts, results);
                 
                 if (debug)
                 {
-                    Console.WriteLine($"[SqlPatternMatcher] Found {results.Count} matches across all ASTs");
+                    DebugLog($"[SqlPatternMatcher] Found {results.Count} matches across all ASTs");
                 }
                 
                 return results;
@@ -191,9 +170,9 @@ namespace PgQuery.NET.Analysis
                 var errorMessage = $"Search across ASTs failed: {ex.Message}";
                 if (debug)
                 {
-                    Console.WriteLine($"[SqlPatternMatcher] {errorMessage}");
+                    DebugLog($"[SqlPatternMatcher] {errorMessage}");
                 }
-                Console.WriteLine($"[SqlPatternMatcher] {errorMessage}");
+                DebugLog($"[SqlPatternMatcher] {errorMessage}");
                 return new List<IMessage>();
             }
         }
@@ -583,7 +562,7 @@ namespace PgQuery.NET.Analysis
             {
                 if (debug)
                 {
-                    Console.WriteLine($"[SqlPatternMatcher] Matching pattern: {pattern}");
+                    DebugLog($"[SqlPatternMatcher] Matching pattern: {pattern}");
                 }
                 
                 var success = Match(pattern, sql);
@@ -591,7 +570,7 @@ namespace PgQuery.NET.Analysis
                 
                 if (debug)
                 {
-                    Console.WriteLine($"[SqlPatternMatcher] Result: {success} - {details}");
+                    DebugLog($"[SqlPatternMatcher] Result: {success} - {details}");
                 }
                 
                 return (success, details);
@@ -601,7 +580,7 @@ namespace PgQuery.NET.Analysis
                 var errorMessage = $"Match failed: {ex.Message}";
                 if (debug)
                 {
-                    Console.WriteLine($"[SqlPatternMatcher] Error: {errorMessage}");
+                    DebugLog($"[SqlPatternMatcher] Error: {errorMessage}");
                 }
                 return (false, errorMessage);
             }
@@ -660,42 +639,8 @@ namespace PgQuery.NET.Analysis
         /// Get cached expression or compile and cache new one.
         /// Thread-safe with bounded cache size for memory management.
         /// </summary>
-        private static IExpression GetCachedExpression(string pattern)
-        {
-            // Performance: Check cache first (lock-free read in most cases)
-            if (_expressionCache.TryGetValue(pattern, out var cached))
-            {
-                return cached;
-            }
-
-            // Performance: Double-checked locking pattern for compilation
-            lock (_cacheLock)
-            {
-                if (_expressionCache.TryGetValue(pattern, out cached))
-                {
-                    return cached;
-                }
-
-                // Performance: Bounded cache to prevent memory leaks
-                if (_expressionCache.Count >= MAX_CACHE_SIZE)
-                {
-                    // Remove oldest entries (simple FIFO eviction)
-                    var toRemove = _expressionCache.Keys.Take(_expressionCache.Count / 4).ToList();
-                    foreach (var key in toRemove)
-                    {
-                        _expressionCache.TryRemove(key, out _);
-                    }
-                }
-
-                // Compile and cache the expression
-                var expression = CompileExpression(pattern);
-                _expressionCache[pattern] = expression;
-                return expression;
-            }
-        }
-
         /// <summary>
-        /// Performance optimized expression compilation with smart caching.
+        /// Direct expression compilation without caching.
         /// </summary>
         private static IExpression CompileExpression(string pattern)
         {
@@ -708,13 +653,10 @@ namespace PgQuery.NET.Analysis
                     return new Find(pattern);
                 }
                 
-                // Check for simple patterns that can use cached literals
+                // Handle simple patterns directly
                 if (IsSimplePattern(pattern))
                 {
-                    if (LITERALS.TryGetValue(pattern, out var literal))
-                    {
-                        return literal;
-                    }
+                    return new Find(pattern);
                 }
 
                 // Use the expression parser for complex patterns
@@ -1180,21 +1122,7 @@ namespace PgQuery.NET.Analysis
         /// <summary>
         /// Clear expression cache (for testing or memory management).
         /// </summary>
-        public static void ClearCache()
-        {
-            lock (_cacheLock)
-            {
-                _expressionCache.Clear();
-            }
-        }
-
-        /// <summary>
-        /// Get cache statistics for monitoring.
-        /// </summary>
-        public static (int count, int maxSize) GetCacheStats()
-        {
-            return (_expressionCache.Count, MAX_CACHE_SIZE);
-        }
+        // Cache methods removed - no caching mechanism
 
         // Shared case conversion utilities
         private static bool HandleCaseConversions(string? value, string? target)
@@ -1694,7 +1622,8 @@ namespace PgQuery.NET.Analysis
                 }
                 
                 // Check if we have any Capture expressions - if so, we need to call them individually
-                bool hasCaptureExpressions = _expressions.Any(expr => expr is Capture);
+                // Also check nested expressions like Until that might contain captures
+                bool hasCaptureExpressions = HasCaptureExpressions(_expressions);
                 DebugLog($"[All] Has capture expressions: {hasCaptureExpressions}");
                 
                 // Only try base Find logic if we don't have capture expressions
@@ -1764,6 +1693,45 @@ namespace PgQuery.NET.Analysis
                 }
                 DebugLog($"[All] All expressions matched successfully");
                 return true;
+            }
+
+            private static bool HasCaptureExpressions(IExpression[] expressions)
+            {
+                foreach (var expr in expressions)
+                {
+                    if (expr is Capture)
+                    {
+                        return true;
+                    }
+                    // Check nested expressions that might contain captures
+                    if (expr is Until until)
+                    {
+                        // Use reflection to access the private _expressions field
+                        var field = typeof(Until).GetField("_expressions", 
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        if (field?.GetValue(until) is IExpression[] untilExpressions)
+                        {
+                            if (HasCaptureExpressions(untilExpressions))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    // Add other nested expression types as needed
+                    if (expr is All all)
+                    {
+                        var field = typeof(All).GetField("_expressions", 
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        if (field?.GetValue(all) is IExpression[] allExpressions)
+                        {
+                            if (HasCaptureExpressions(allExpressions))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
             }
         }
 
@@ -2006,12 +1974,13 @@ namespace PgQuery.NET.Analysis
                 foreach (Match match in matches)
                 {
                     _tokens.Enqueue(match.Value);
+                    DebugLog($"[ExpressionParser] Token: '{match.Value}'");
                 }
             }
 
             public IExpression Parse()
             {
-                if (_tokens.Count == 0) return LITERALS["_"];
+                if (_tokens.Count == 0) return new Find("_");
 
                 var token = _tokens.Dequeue();
                 DebugLog($"[Parser] Parsing token: '{token}'");
@@ -2026,8 +1995,10 @@ namespace PgQuery.NET.Analysis
                     "?" => new Maybe(Parse()),
                     "^" => new Parent(Parse()),
                     "..." => new Until(ParseUntil("")),
-                    var str when str.StartsWith("\"") && str.EndsWith("\"") => new Find(str[1..^1]),
-                    var str when LITERALS.ContainsKey(str) => LITERALS[str],
+                    "\"" =>  new Find(ParseUntil("\"")),
+                    "'" =>  new Find(ParseUntil("'")),
+                    "_" => new Find("_"),
+                    "nil" => new Find("nil"),
                     _ => new Find(TypecastValue(token))
                 };
                 
@@ -2040,6 +2011,7 @@ namespace PgQuery.NET.Analysis
                 // Handle different capture patterns:
                 // $() -> capture full node (unnamed)
                 // $name -> capture with name "name" 
+                // $_ -> capture using Something validation (unnamed)
                 // $(expr) -> capture the result of expression expr (unnamed)
                 
                 if (_tokens.Count > 0 && _tokens.Peek() == "(")
@@ -2049,7 +2021,7 @@ namespace PgQuery.NET.Analysis
                     {
                         _tokens.Dequeue(); // consume the ")"
                         // $() - capture full node (unnamed)
-                        return new Capture(LITERALS["_"]);
+                        return new Capture(new Find("_"));
                     }
                     else
                     {
@@ -2067,19 +2039,33 @@ namespace PgQuery.NET.Analysis
                 }
                 else if (_tokens.Count > 0)
                 {
-                    // $name - capture with name
-                    var captureName = _tokens.Dequeue();
-                    DebugLog($"[ParseCapture] Extracted capture name: '{captureName}'");
+                    // Peek at the next token to decide what to do
+                    var nextToken = _tokens.Peek();
+                    DebugLog($"[ParseCapture] Next token after $: '{nextToken}'");
                     
-                    // The capture should capture whatever expression follows
-                    // For patterns like ($name (relname $name)), the first $name captures the whole match
-                    // and the second $name captures the relname value
-                    return new Capture(LITERALS["_"], captureName);
+                    if (nextToken == "_")
+                    {
+                        _tokens.Dequeue(); // consume the "_"
+                        DebugLog($"[ParseCapture] Creating $_ capture with Something validation (unnamed)");
+                        // $_ - capture using Something validation (validates non-null) - unnamed capture
+                        return new Capture(SOMETHING_INSTANCE, null);
+                    }
+                    else
+                    {
+                        // $name - capture with name
+                        var captureName = _tokens.Dequeue();
+                        DebugLog($"[ParseCapture] Extracted capture name: '{captureName}'");
+                        
+                        // The capture should capture whatever expression follows
+                        // For patterns like ($name (relname $name)), the first $name captures the whole match
+                        // and the second $name captures the relname value
+                        return new Capture(new Find("_"), captureName);
+                    }
                 }
                 else
                 {
                     // $ with no following token - capture everything
-                    return new Capture(LITERALS["_"]);
+                    return new Capture(new Find("_"));
                 }
             }
 
@@ -2140,7 +2126,7 @@ namespace PgQuery.NET.Analysis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[SqlPatternMatcher] Parse tree generation failed: {ex.Message}");
+                DebugLog($"[SqlPatternMatcher] Parse tree generation failed: {ex.Message}");
                 return null;
             }
         }
@@ -2202,6 +2188,16 @@ namespace PgQuery.NET.Analysis
                         }
                     }
                 }
+            }
+        }
+
+        // Something Expression - validates that content is not null (for $_ captures)
+        private class Something : IExpression
+        {
+            public bool Match(IMessage node)
+            {
+                DebugLog($"[Something] Checking if node is not null: {node?.Descriptor?.Name}");
+                return node != null;
             }
         }
     }

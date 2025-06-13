@@ -4,4 +4,4 @@
 # Usage: ./grepsql.sh "pattern" [files...] [options]
 
 cd "$(dirname "$0")"
-exec ./bin/GrepSQL "$@" 
+exec ./src/GrepSQL/GrepSQL/bin/Debug/net9.0/osx-arm64/GrepSQL "$@" 

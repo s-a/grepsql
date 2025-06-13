@@ -242,6 +242,8 @@ namespace GrepSQL
 
         static void ProcessSql(string fileName, string content, string pattern, bool debug, bool verbose, List<SqlMatch> matches)
         {
+            // No caching mechanism - expressions are compiled fresh each time
+            
             // Split content into individual SQL statements (basic approach)
             var sqlStatements = SplitSqlStatements(content);
             
