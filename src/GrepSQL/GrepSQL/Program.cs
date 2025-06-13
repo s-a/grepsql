@@ -606,30 +606,47 @@ namespace GrepSQL
                         
                         foreach (var capturedNode in capturedNodes)
                         {
-                            var captureValue = ExtractNodeValue(capturedNode);
-                            if (!string.IsNullOrEmpty(captureValue))
+                            // If --tree is specified with --captures-only, show tree structure of captured nodes
+                            if (options.PrintTree)
                             {
-                                if (onlyDefaultCaptures)
-                                {
-                                    // Don't show [default]: prefix when there's only default captures
-                                    Console.WriteLine($"{prefix}{captureValue}");
-                                }
-                                else
-                                {
-                                    // Show capture group name when there are multiple named captures
-                                    Console.WriteLine($"{prefix}[{captureName}]: {captureValue}");
-                                }
+                                var captureHeader = onlyDefaultCaptures ? 
+                                    $"{prefix}[CAPTURED NODE]" : 
+                                    $"{prefix}[{captureName}]";
+                                    
+                                Console.WriteLine(captureHeader);
+                                
+                                var useColors = !options.NoColor && TreePrinter.SupportsColors();
+                                var treeMode = ParseTreeMode(options.TreeMode);
+                                TreePrinter.PrintTree(capturedNode, useColors, maxDepth: 8, TreePrinter.NodeStatus.Matched, treeMode);
                             }
                             else
                             {
-                                // If we can't extract a simple value, show the node type
-                                if (onlyDefaultCaptures)
+                                // Default behavior: extract simple values or show node type
+                                var captureValue = ExtractNodeValue(capturedNode);
+                                if (!string.IsNullOrEmpty(captureValue))
                                 {
-                                    Console.WriteLine($"{prefix}{capturedNode.Descriptor?.Name ?? "Unknown"}");
+                                    if (onlyDefaultCaptures)
+                                    {
+                                        // Don't show [default]: prefix when there's only default captures
+                                        Console.WriteLine($"{prefix}{captureValue}");
+                                    }
+                                    else
+                                    {
+                                        // Show capture group name when there are multiple named captures
+                                        Console.WriteLine($"{prefix}[{captureName}]: {captureValue}");
+                                    }
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"{prefix}[{captureName}]: {capturedNode.Descriptor?.Name ?? "Unknown"}");
+                                    // If we can't extract a simple value, show the node type
+                                    if (onlyDefaultCaptures)
+                                    {
+                                        Console.WriteLine($"{prefix}{capturedNode.Descriptor?.Name ?? "Unknown"}");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"{prefix}[{captureName}]: {capturedNode.Descriptor?.Name ?? "Unknown"}");
+                                    }
                                 }
                             }
                         }

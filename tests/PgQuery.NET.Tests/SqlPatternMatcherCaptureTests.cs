@@ -330,5 +330,36 @@ namespace PgQuery.NET.Tests
                 _output.WriteLine("✅ Captures found - mechanism is working!");
             }
         }
+
+        [Fact]
+        public void TestCaptureWithTreeOutput()
+        {
+            _output.WriteLine("=== Testing Capture with Tree Output ==");
+            
+            var sql = "SELECT id FROM users";
+            var pattern = "($table (relname _))";
+            
+            _output.WriteLine($"SQL: {sql}");
+            _output.WriteLine($"Pattern: {pattern}");
+            
+            var results = SqlPatternMatcher.Search(pattern, sql, debug: false);
+            var captures = SqlPatternMatcher.GetCaptures();
+            
+            Assert.True(captures.Count > 0, "Should have captures");
+            Assert.True(captures.ContainsKey("table"), "Should have 'table' capture");
+            
+            // Test that we can format the captured node as a tree
+            var capturedNode = captures["table"][0];
+            var treeOutput = TreePrinter.FormatTree(capturedNode, useColors: false, maxDepth: 8);
+            
+            _output.WriteLine("Tree output:");
+            _output.WriteLine(treeOutput);
+            
+            // Verify tree contains expected elements
+            Assert.Contains("SelectStmt", treeOutput);
+            Assert.Contains("relname: users", treeOutput);
+            
+            SqlPatternMatcher.ClearCaptures();
+        }
     }
 } 

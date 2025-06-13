@@ -51,6 +51,9 @@ Search through SQL files with powerful pattern matching:
 
 # Extract captured values only ✨ NEW
 ./grepsql.sh -p "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only
+
+# Show detailed tree structure of captured nodes ✨ NEW
+./grepsql.sh -p "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only --tree
 ```
 
 ### 2. 🧠 **Advanced SQL Pattern Matching**
@@ -492,6 +495,10 @@ $()                                       # Capture without specific name
 # Debug capture parsing
 ./grepsql.sh -p "(\$debug (relname _))" --from-sql "SELECT * FROM debug_table" --debug
 # Shows detailed parsing and capture process
+
+# Show tree structure of captured nodes
+./grepsql.sh -p "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only --tree
+# Output: [table] + detailed AST tree structure
 ```
 
 #### **C# API Usage**
@@ -554,6 +561,9 @@ var whereClause = captures["condition"][0]; // The WHERE condition
 
 # Migration Planning - Extract schema references
 ./grepsql.sh -p "(\$schema_ref (schemaname _))" -f migration.sql --captures-only
+
+# Deep Analysis - Show full AST structure of captured nodes
+./grepsql.sh -p "(\$complex_query SelectStmt)" -f queries.sql --captures-only --tree
 ```
 
 #### **Capture Output Formats**
@@ -571,6 +581,27 @@ Node
   - Node
   - Node  
   - Node
+
+# With --tree flag, shows detailed AST structure
+[table]
+✓ Node
+SelectStmt
+  targetList: [1 items]
+    [0]: 
+    Node
+    ResTarget
+      val: 
+      Node
+      ColumnRef
+        fields: [1 items]
+          [0]: 
+          Node
+          A_Star
+  fromClause: [1 items]
+    [0]: 
+    Node
+    RangeVar
+      relname: users
 ```
 
 ### **7. Advanced Patterns**
