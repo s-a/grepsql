@@ -127,11 +127,11 @@ namespace PgQuery.NET.AST.Pattern
             switch (token)
             {
                 case "(":
-                    return ParseUntil(tokens, ")");
+                    return ParseUntil(tokens, ")", false);
                 case "{":
-                    return new Any(ParseUntil(tokens, "}"));
+                    return ParseUntil(tokens, "}", true); // true = create Any pattern
                 case "[":
-                    return new All(ParseUntil(tokens, "]"));
+                    return ParseUntil(tokens, "]", false); // TODO: implement All pattern
                 case "^":
                     return new Parent(ParseExpression(tokens));
                 case "!":
@@ -153,7 +153,7 @@ namespace PgQuery.NET.AST.Pattern
             }
         }
 
-        private static Find ParseUntil(List<string> tokens, string endToken)
+        private static Find ParseUntil(List<string> tokens, string endToken, bool createAnyPattern = false)
         {
             var expressions = new List<Find>();
             
@@ -174,7 +174,7 @@ namespace PgQuery.NET.AST.Pattern
                 return expressions[0];
             
             // Special case: (fieldname $_) should be treated as a field capture
-            if (expressions.Count == 2 && 
+            if (!createAnyPattern && expressions.Count == 2 && 
                 expressions[0] is Find fieldFind && 
                 expressions[1] is Capture capture &&
                 fieldFind.GetNodeType() != null &&
@@ -182,6 +182,14 @@ namespace PgQuery.NET.AST.Pattern
             {
                 // Create a special field capture that captures the field value
                 return new FieldCapture(capture._name, fieldFind.GetNodeType());
+            }
+            
+            // Handle Any pattern creation
+            if (createAnyPattern)
+            {
+                var anyPattern = new Any();
+                anyPattern.Conditions.AddRange(expressions);
+                return anyPattern;
             }
             
             // Create a compound expression with multiple conditions

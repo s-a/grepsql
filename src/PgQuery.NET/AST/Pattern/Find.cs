@@ -249,7 +249,14 @@ namespace PgQuery.NET.AST.Pattern
                 result = _nodeType;
             }
             
-            if (Conditions.Count > 0)
+            // For base Find class with conditions, show as compound
+            if (GetType() == typeof(Find) && Conditions.Count > 0)
+            {
+                return $"Find({string.Join(", ", Conditions.Select(c => c.ToString()))})";
+            }
+            
+            // For other classes, only add conditions if they have them
+            if (Conditions.Count > 0 && GetType() != typeof(Something))
             {
                 result += $"({string.Join(", ", Conditions.Select(c => c.ToString()))})";
             }
@@ -270,7 +277,12 @@ namespace PgQuery.NET.AST.Pattern
 
         public override string ToString()
         {
-            return "Something(" + base.ToString() + ")";
+            // For Something with conditions, show as compound
+            if (Conditions.Count > 0)
+            {
+                return $"Find({string.Join(", ", Conditions.Select(c => c.ToString()))})";
+            }
+            return "Something";
         }
     }
 
