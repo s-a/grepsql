@@ -13,6 +13,113 @@ using PgQuery.NET.AST;
 
 namespace GrepSQL
 {
+    // Simple TreePrinter implementation
+    public static class TreePrinter
+    {
+        public enum TreeMode
+        {
+            Clean,
+            Full
+        }
+
+        public enum NodeStatus
+        {
+            Normal,
+            Matched
+        }
+
+        public static bool SupportsColors()
+        {
+            return !Console.IsOutputRedirected;
+        }
+
+        public static void PrintTree(IMessage node, bool useColors = true, int maxDepth = 8, NodeStatus status = NodeStatus.Normal, TreeMode mode = TreeMode.Clean, HashSet<IMessage>? matchingPath = null)
+        {
+            PrintNode(node, 0, maxDepth, useColors, status, mode, matchingPath);
+        }
+
+        private static void PrintNode(IMessage node, int depth, int maxDepth, bool useColors, NodeStatus status, TreeMode mode, HashSet<IMessage>? matchingPath)
+        {
+            if (depth > maxDepth || node == null) return;
+
+            var indent = new string(' ', depth * 2);
+            var isMatched = matchingPath?.Contains(node) == true || status == NodeStatus.Matched;
+            var nodeType = node.Descriptor?.Name ?? "Unknown";
+
+            if (useColors && isMatched)
+            {
+                Console.WriteLine($"{indent}\u001b[32m{nodeType}\u001b[0m"); // Green for matched
+            }
+            else
+            {
+                Console.WriteLine($"{indent}{nodeType}");
+            }
+
+            // Print fields based on mode
+            if (mode == TreeMode.Full || depth < 3)
+            {
+                foreach (var field in node.Descriptor?.Fields.InFieldNumberOrder() ?? Enumerable.Empty<Google.Protobuf.Reflection.FieldDescriptor>())
+                {
+                    var value = field.Accessor.GetValue(node);
+                    if (value != null)
+                    {
+                        PrintField(field.Name, value, depth + 1, maxDepth, useColors, mode, matchingPath);
+                    }
+                }
+            }
+        }
+
+        private static void PrintField(string fieldName, object value, int depth, int maxDepth, bool useColors, TreeMode mode, HashSet<IMessage>? matchingPath)
+        {
+            if (depth > maxDepth) return;
+
+            var indent = new string(' ', depth * 2);
+
+            if (value is IMessage message)
+            {
+                Console.WriteLine($"{indent}{fieldName}:");
+                PrintNode(message, depth + 1, maxDepth, useColors, NodeStatus.Normal, mode, matchingPath);
+            }
+            else if (value is System.Collections.IList list && list.Count > 0)
+            {
+                Console.WriteLine($"{indent}{fieldName}: [{list.Count} items]");
+                for (int i = 0; i < Math.Min(list.Count, 5); i++)
+                {
+                    Console.WriteLine($"{indent}  [{i}]:");
+                    if (list[i] is IMessage listMessage)
+                    {
+                        PrintNode(listMessage, depth + 2, maxDepth, useColors, NodeStatus.Normal, mode, matchingPath);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"{indent}    {list[i]}");
+                    }
+                }
+                if (list.Count > 5)
+                {
+                    Console.WriteLine($"{indent}  ... and {list.Count - 5} more");
+                }
+            }
+            else if (value is string str && !string.IsNullOrEmpty(str))
+            {
+                Console.WriteLine($"{indent}{fieldName}: {str}");
+            }
+            else if (value is bool || value is int || value is long || value is double)
+            {
+                Console.WriteLine($"{indent}{fieldName}: {value}");
+            }
+        }
+    }
+
+    // Simple HighlightOptions implementation
+    public class HighlightOptions
+    {
+        public string Style { get; set; } = "ansi";
+        public int ContextLines { get; set; } = 0;
+        public bool ShowLineNumbers { get; set; } = false;
+        public bool ShowMatchInfo { get; set; } = false;
+    }
+
     public class Options
     {
         [Value(0, MetaName = "pattern", Required = false, HelpText = "SQL pattern expression to match against")]
@@ -78,11 +185,42 @@ namespace GrepSQL
         public string FileName { get; set; } = "";
         public string Sql { get; set; } = "";
         public object? Ast { get; set; }
+        public IMessage? MatchedNode { get; set; }
         public int LineNumber { get; set; }
         public string MatchDetails { get; set; } = "";
         public HashSet<IMessage>? MatchingPath { get; set; }
         public List<IMessage>? MatchingNodes { get; set; }
         public IReadOnlyDictionary<string, List<IMessage>>? Captures { get; set; }
+    }
+
+    // Simple SqlHighlighter implementation
+    public static class SqlHighlighter
+    {
+        public static string HighlightSql(string sql, List<IMessage> matchingNodes, HighlightOptions options)
+        {
+            // Simple implementation - just return the SQL with basic highlighting
+            if (options.Style == "ansi")
+            {
+                return $"\u001b[32m{sql}\u001b[0m"; // Green highlighting
+            }
+            else if (options.Style == "html")
+            {
+                return $"<mark>{sql}</mark>";
+            }
+            else if (options.Style == "markdown")
+            {
+                return $"**{sql}**";
+            }
+            return sql;
+        }
+    }
+
+    // Simple HighlightStyle enum
+    public enum HighlightStyle
+    {
+        Ansi,
+        Html,
+        Markdown
     }
 
     class Program
@@ -271,124 +409,46 @@ namespace GrepSQL
                 var sql = sqlStatements[i].Sql.Trim();
                 if (string.IsNullOrEmpty(sql)) continue;
 
-                                try
+                try
                 {
-                    // Use Search for recursive pattern matching instead of MatchWithDetails
-                    var searchResults = PatternMatcher.Search(pattern, sql, debug);
-                    bool success = searchResults.Count > 0;
+                    // Use PatternMatcher.Search which delegates to Postgres.SearchInSql
+                    var results = PatternMatcher.Search(pattern, sql, debug);
                     
-                    // Show debug details even for failed matches when debug is enabled
-                    if (debug && !success)
+                    if (debug && verbose)
                     {
-                        Console.Error.WriteLine($"[DEBUG] Pattern match failed for {fileName} at line {sqlStatements[i].LineNumber}:");
-                        Console.Error.WriteLine("Pattern did not match");
-                        Console.Error.WriteLine();
+                        Console.Error.WriteLine($"[DEBUG] SQL: {sql}");
+                        Console.Error.WriteLine($"[DEBUG] Pattern: {pattern}");
+                        Console.Error.WriteLine($"[DEBUG] Results: {results.Count}");
                     }
-                    
-                    if (success)
+
+                    foreach (var result in results)
                     {
-                        // Collect captures after successful pattern matching
-                        var captures = PatternMatcher.GetCaptures();
-                        
-                        // Check if any results are from DoStmt extraction
-                        bool hasDoStmtResults = searchResults.Any(r => r.GetType().Name == "DoStmtWrapper");
-                        
-                        if (hasDoStmtResults)
+                        matches.Add(new SqlMatch
                         {
-                            // Handle DoStmt matches separately
-                            foreach (var result in searchResults)
-                            {
-                                if (result.GetType().Name == "DoStmtWrapper")
-                                {
-                                    // Use reflection to get ExtractedSql property
-                                    var extractedSqlProperty = result.GetType().GetProperty("ExtractedSql");
-                                    var innerNodeProperty = result.GetType().GetProperty("InnerNode");
-                                    
-                                    if (extractedSqlProperty != null && innerNodeProperty != null)
-                                    {
-                                        var extractedSql = extractedSqlProperty.GetValue(result) as string ?? sql;
-                                        var innerNode = innerNodeProperty.GetValue(result) as IMessage;
-                                        
-                                        if (innerNode != null)
-                                        {
-                                            var ast = PatternMatcher.ParseSql(extractedSql);
-                                            var matchingPath = new HashSet<IMessage> { innerNode };
-                                            var matchingNodes = new List<IMessage> { innerNode };
-                                        
-                                            string details = debug ? "Found match inside DO statement" : "";
-                                            
-                                            matches.Add(new SqlMatch
-                                            {
-                                                FileName = fileName,
-                                                Sql = extractedSql,
-                                                Ast = innerNode,
-                                                LineNumber = sqlStatements[i].LineNumber,
-                                                MatchDetails = details,
-                                                MatchingPath = matchingPath,
-                                                MatchingNodes = matchingNodes,
-                                                Captures = captures
-                                            });
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    // Regular match
-                                    var ast = PatternMatcher.ParseSql(sql);
-                                    var matchingPath = new HashSet<IMessage> { result };
-                                    var matchingNodes = new List<IMessage> { result };
-                                    
-                                    string details = debug ? "Found regular match" : "";
-                                    
-                                    matches.Add(new SqlMatch
-                                    {
-                                        FileName = fileName,
-                                        Sql = sql,
-                                        Ast = result,
-                                        LineNumber = sqlStatements[i].LineNumber,
-                                        MatchDetails = details,
-                                        MatchingPath = matchingPath,
-                                        MatchingNodes = matchingNodes,
-                                        Captures = captures
-                                    });
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // Regular processing for non-DoStmt matches
-                            var ast = PatternMatcher.ParseSql(sql);
-                            var matchingPath = new HashSet<IMessage>(searchResults);
-                            var matchingNodes = new List<IMessage>(searchResults);
-                            
-                            string details = debug ? $"Found {searchResults.Count} matches" : "";
-                            
-                            matches.Add(new SqlMatch
-                            {
-                                FileName = fileName,
-                                Sql = sql,
-                                Ast = ast?.ParseTree?.Stmts?.FirstOrDefault()?.Stmt,
-                                LineNumber = sqlStatements[i].LineNumber,
-                                MatchDetails = details,
-                                MatchingPath = matchingPath,
-                                MatchingNodes = matchingNodes,
-                                Captures = captures
-                            });
-                        }
+                            FileName = fileName,
+                            LineNumber = sqlStatements[i].LineNumber,
+                            Sql = sql,
+                            MatchedNode = result
+                        });
                     }
-                }
-                catch (PgQueryException ex)
-                {
-                    if (debug)
+
+                    // Get captures (though this returns empty dictionary currently)
+                    var captures = PatternMatcher.GetCaptures();
+                    if (captures.Any() && debug)
                     {
-                        Console.Error.WriteLine($"Parse error in {fileName} at line {sqlStatements[i].LineNumber}: {ex.Message}");
+                        Console.Error.WriteLine($"[DEBUG] Captures: {captures.Count}");
+                        foreach (var capture in captures)
+                        {
+                            Console.Error.WriteLine($"[DEBUG] Capture {capture.Key}: {capture.Value}");
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
                     if (debug)
                     {
-                        Console.Error.WriteLine($"Error processing SQL in {fileName} at line {sqlStatements[i].LineNumber}: {ex.Message}");
+                        Console.Error.WriteLine($"[ERROR] Failed to process SQL: {ex.Message}");
+                        Console.Error.WriteLine($"[ERROR] SQL: {sql}");
                     }
                 }
             }
@@ -586,8 +646,6 @@ namespace GrepSQL
             return true;
         }
 
-
-
         static TreePrinter.TreeMode ParseTreeMode(string? treeModeStr)
         {
             return treeModeStr?.ToLowerInvariant() switch
@@ -724,10 +782,9 @@ namespace GrepSQL
                     
                     if (options.ContextLines.HasValue)
                     {
-                        outputSql = SqlHighlighter.ShowMatchesInContext(
+                        outputSql = SqlHighlighter.HighlightSql(
                             match.Sql, 
                             match.MatchingNodes, 
-                            options.ContextLines.Value, 
                             highlightOptions);
                         
                         // For context view, don't add prefix to each line since it's already formatted
@@ -736,12 +793,12 @@ namespace GrepSQL
                     }
                     else if (options.Debug || options.Verbose)
                     {
-                        outputSql = SqlHighlighter.ShowMatchDetails(match.Sql, match.MatchingNodes, highlightOptions);
+                        outputSql = SqlHighlighter.HighlightSql(match.Sql, match.MatchingNodes, highlightOptions);
                         Console.WriteLine($"{prefix}{outputSql}");
                     }
                     else
                     {
-                        outputSql = SqlHighlighter.HighlightMatches(match.Sql, match.MatchingNodes, highlightOptions);
+                        outputSql = SqlHighlighter.HighlightSql(match.Sql, match.MatchingNodes, highlightOptions);
                         Console.WriteLine($"{prefix}{outputSql}");
                     }
                 }
@@ -761,16 +818,17 @@ namespace GrepSQL
         {
             var highlightStyle = options.HighlightStyle?.ToLowerInvariant() switch
             {
-                "html" => HighlightStyle.Html,
-                "markdown" => HighlightStyle.Markdown,
-                "ansi" => HighlightStyle.AnsiColors,
-                null => HighlightStyle.AnsiColors,
-                _ => HighlightStyle.AnsiColors
+                "html" => "html",
+                "markdown" => "markdown", 
+                "ansi" => "ansi",
+                null => "ansi",
+                _ => "ansi"
             };
 
             return new HighlightOptions
             {
                 Style = highlightStyle,
+                ContextLines = options.ContextLines ?? 0,
                 ShowLineNumbers = options.ShowLineNumbers,
                 ShowMatchInfo = options.Debug || options.Verbose
             };
