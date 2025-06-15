@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using Xunit;
 using Xunit.Abstractions;
+using PgQuery.NET.AST;
 
 namespace PgQuery.NET.Tests
 {
@@ -29,32 +30,32 @@ namespace PgQuery.NET.Tests
             }
         }
 
-        private void PrintNode(AST.Node node, int depth = 0)
+        private void PrintNode(Google.Protobuf.IMessage node, int depth = 0)
         {
             var indent = new string(' ', depth * 2);
-            _output.WriteLine($"{indent}Node: {node.NodeCase}");
+            _output.WriteLine($"{indent}Node: {node.GetType().Name}");
 
-            switch (node.NodeCase)
+            switch (node)
             {
-                case AST.Node.NodeOneofCase.SelectStmt:
-                    PrintSelectStmt(node.SelectStmt, depth + 1);
+                case SelectStmt selectStmt:
+                    PrintSelectStmt(selectStmt, depth + 1);
                     break;
-                case AST.Node.NodeOneofCase.RangeVar:
-                    PrintRangeVar(node.RangeVar, depth + 1);
+                case RangeVar rangeVar:
+                    PrintRangeVar(rangeVar, depth + 1);
                     break;
-                case AST.Node.NodeOneofCase.AExpr:
-                    PrintAExpr(node.AExpr, depth + 1);
+                case A_Expr aExpr:
+                    PrintAExpr(aExpr, depth + 1);
                     break;
-                case AST.Node.NodeOneofCase.ColumnRef:
-                    PrintColumnRef(node.ColumnRef, depth + 1);
+                case ColumnRef columnRef:
+                    PrintColumnRef(columnRef, depth + 1);
                     break;
-                case AST.Node.NodeOneofCase.AConst:
-                    PrintAConst(node.AConst, depth + 1);
+                case A_Const aConst:
+                    PrintAConst(aConst, depth + 1);
                     break;
             }
         }
 
-        private void PrintSelectStmt(AST.SelectStmt stmt, int depth)
+        private void PrintSelectStmt(SelectStmt stmt, int depth)
         {
             var indent = new string(' ', depth * 2);
             
@@ -77,13 +78,13 @@ namespace PgQuery.NET.Tests
             }
         }
 
-        private void PrintRangeVar(AST.RangeVar rangeVar, int depth)
+        private void PrintRangeVar(RangeVar rangeVar, int depth)
         {
             var indent = new string(' ', depth * 2);
             _output.WriteLine($"{indent}Table: {rangeVar.Relname}");
         }
 
-        private void PrintAExpr(AST.A_Expr aexpr, int depth)
+        private void PrintAExpr(A_Expr aexpr, int depth)
         {
             var indent = new string(' ', depth * 2);
             _output.WriteLine($"{indent}Operator: {string.Join(".", aexpr.Name)}");
@@ -95,22 +96,22 @@ namespace PgQuery.NET.Tests
             PrintNode(aexpr.Rexpr, depth + 1);
         }
 
-        private void PrintColumnRef(AST.ColumnRef columnRef, int depth)
+        private void PrintColumnRef(ColumnRef columnRef, int depth)
         {
             var indent = new string(' ', depth * 2);
             _output.WriteLine($"{indent}Column: {string.Join(".", columnRef.Fields)}");
         }
 
-        private void PrintAConst(AST.A_Const aconst, int depth)
+        private void PrintAConst(A_Const aconst, int depth)
         {
             var indent = new string(' ', depth * 2);
             var value = aconst.ValCase switch
             {
-                AST.A_Const.ValOneofCase.Ival => aconst.Ival.Ival.ToString(),
-                AST.A_Const.ValOneofCase.Fval => aconst.Fval.Fval,
-                AST.A_Const.ValOneofCase.Sval => aconst.Sval.Sval,
-                AST.A_Const.ValOneofCase.Boolval => aconst.Boolval.Boolval.ToString(),
-                AST.A_Const.ValOneofCase.Bsval => aconst.Bsval.Bsval,
+                A_Const.ValOneofCase.Ival => aconst.Ival.Ival.ToString(),
+                A_Const.ValOneofCase.Fval => aconst.Fval.Fval,
+                A_Const.ValOneofCase.Sval => aconst.Sval.Sval,
+                A_Const.ValOneofCase.Boolval => aconst.Boolval.Boolval.ToString(),
+                A_Const.ValOneofCase.Bsval => aconst.Bsval.Bsval,
                 _ => "null"
             };
             _output.WriteLine($"{indent}Value: {value}");

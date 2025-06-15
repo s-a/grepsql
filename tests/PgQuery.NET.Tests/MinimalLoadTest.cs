@@ -1,6 +1,7 @@
 using System;
 using Xunit;
 using Xunit.Abstractions;
+using PgQuery.NET.AST;
 
 namespace PgQuery.NET.Tests
 {
@@ -39,7 +40,7 @@ namespace PgQuery.NET.Tests
                         if (target.ResTarget.Val.AConst != null)
                         {
                             _output.WriteLine($"Constant value case: {target.ResTarget.Val.AConst.ValCase}");
-                            if (target.ResTarget.Val.AConst.ValCase == AST.A_Const.ValOneofCase.Ival)
+                            if (target.ResTarget.Val.AConst.ValCase == A_Const.ValOneofCase.Ival)
                             {
                                 _output.WriteLine($"Integer value: {target.ResTarget.Val.AConst.Ival.Ival}");
                             }
