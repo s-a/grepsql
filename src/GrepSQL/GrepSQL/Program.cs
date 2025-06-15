@@ -411,6 +411,17 @@ namespace GrepSQL
 
                 try
                 {
+                    // Parse the SQL to get the AST
+                    var parseResult = Postgres.ParseSql(sql);
+                    if (parseResult?.ParseTree == null)
+                    {
+                        if (debug)
+                        {
+                            Console.Error.WriteLine($"[DEBUG] Failed to parse SQL: {sql}");
+                        }
+                        continue;
+                    }
+
                     // Use PatternMatcher.Search which delegates to Postgres.SearchInSql
                     var results = PatternMatcher.Search(pattern, sql, debug);
                     
@@ -421,15 +432,21 @@ namespace GrepSQL
                         Console.Error.WriteLine($"[DEBUG] Results: {results.Count}");
                     }
 
-                    foreach (var result in results)
+                    if (results.Count > 0)
                     {
-                        matches.Add(new SqlMatch
+                        // Create a single match for this SQL statement with all matching nodes
+                        var match = new SqlMatch
                         {
                             FileName = fileName,
                             LineNumber = sqlStatements[i].LineNumber,
                             Sql = sql,
-                            MatchedNode = result
-                        });
+                            Ast = parseResult.ParseTree, // Store the full parse tree
+                            MatchedNode = results.FirstOrDefault(), // Store the first matched node
+                            MatchingNodes = results.ToList(), // Store all matching nodes
+                            MatchingPath = new HashSet<IMessage>(results) // Store matching path for highlighting
+                        };
+
+                        matches.Add(match);
                     }
 
                     // Get captures (though this returns empty dictionary currently)
@@ -757,19 +774,48 @@ namespace GrepSQL
                 Console.WriteLine($"{prefix}[TREE]");
                 var useColors = !options.NoColor && TreePrinter.SupportsColors();
                 var treeMode = ParseTreeMode(options.TreeMode);
-                TreePrinter.PrintTree((IMessage)match.Ast, useColors, maxDepth: 8, TreePrinter.NodeStatus.Normal, treeMode, match.MatchingPath);
+                
+                // Print the tree for the parse tree root
+                if (match.Ast is IMessage astMessage)
+                {
+                    TreePrinter.PrintTree(astMessage, useColors, maxDepth: 8, TreePrinter.NodeStatus.Normal, treeMode, match.MatchingPath);
+                }
+                else
+                {
+                    Console.WriteLine("Unable to display tree - AST is not in expected format");
+                }
             }
             else if (options.PrintAst)
             {
-                var jsonOptions = new JsonSerializerOptions 
-                { 
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-                };
-                
                 Console.WriteLine($"{prefix}[AST]");
-                Console.WriteLine(JsonSerializer.Serialize(match.Ast, jsonOptions));
+                
+                if (match.Ast != null)
+                {
+                    try
+                    {
+                        // Convert protobuf message to JSON
+                        var jsonFormatter = new Google.Protobuf.JsonFormatter(Google.Protobuf.JsonFormatter.Settings.Default.WithFormatDefaultValues(true));
+                        var json = jsonFormatter.Format((IMessage)match.Ast);
+                        
+                        // Pretty print the JSON
+                        var jsonDoc = JsonDocument.Parse(json);
+                        var prettyJson = JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions 
+                        { 
+                            WriteIndented = true
+                        });
+                        
+                        Console.WriteLine(prettyJson);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error serializing AST: {ex.Message}");
+                        Console.WriteLine($"AST Type: {match.Ast.GetType().Name}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("null");
+                }
             }
             else
             {
