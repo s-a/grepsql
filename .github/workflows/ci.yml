@@ -125,13 +125,13 @@ jobs:
         shell: bash
         run: |
           # Test basic functionality
-          dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "SelectStmt" --from-sql "SELECT id FROM users" --count
+          dotnet run --project src/GrepSQL.CLI/GrepSQL --configuration Release -- -p "SelectStmt" --from-sql "SELECT id FROM users" --count
           
           # Test s-expression patterns
-          dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "(relname \"users\")" --from-sql "SELECT * FROM users" --count
+          dotnet run --project src/GrepSQL.CLI/GrepSQL --configuration Release -- -p "(relname \"users\")" --from-sql "SELECT * FROM users" --count
           
           # Test highlighting
-          dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "(relname \"users\")" --from-sql "SELECT * FROM users" --highlight --highlight-style html
+          dotnet run --project src/GrepSQL.CLI/GrepSQL --configuration Release -- -p "(relname \"users\")" --from-sql "SELECT * FROM users" --highlight --highlight-style html
 
   package:
     name: Create NuGet Package
