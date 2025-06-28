@@ -4,4 +4,4 @@
 # Usage: ./grepsql.sh "pattern" [files...] [options]
 
 cd "$(dirname "$0")"
-dotnet run --project src/GrepSQL/GrepSQL/GrepSQL.csproj -- "$@" 
+dotnet run --project src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj -- "$@" 

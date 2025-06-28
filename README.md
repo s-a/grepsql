@@ -34,19 +34,13 @@ dotnet add package GrepSQL
 Search through SQL files with powerful pattern matching:
 ```bash
 # Search for all SELECT statements
-./grepsql.sh "SelectStmt" *.sql
+./grepsql.sh "SelectStmt" --from-sql "SELECT id FROM users"
 
 # Find specific table names with highlighting
 ./grepsql.sh "(relname \"users\")" --from-sql "SELECT * FROM users JOIN products ON users.id = products.user_id" --highlight
 
 # Show AST structure
 ./grepsql.sh "SelectStmt" --from-sql "SELECT id FROM users" --tree
-
-# Extract captured values ✨ NEW
-./grepsql.sh "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only
-
-# Show detailed tree structure of captured nodes ✨ NEW
-./grepsql.sh "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only --tree
 
 # Show expression tree for pattern debugging
 ./grepsql.sh "SelectStmt" --only-exp
@@ -75,84 +69,35 @@ PatternMatcher.Search("(relname \"users\")", sql);
 // Match any table name with wildcard
 PatternMatcher.Search("(relname _)", sql);
 
-// Match column names
-PatternMatcher.Search("(colname \"id\")", sql);
-
 // Match string constants
 PatternMatcher.Search("(sval \"admin\")", sql);
 
 // Match integer constants
 PatternMatcher.Search("(ival 42)", sql);
+
+// Match schema names
+PatternMatcher.Search("(schemaname \"public\")", sql);
 ```
 
-#### **Ellipsis Patterns - Deep AST Navigation**
+#### **Set Pattern Matching**
 ```csharp
-// Find WHERE clauses anywhere in the query
-PatternMatcher.Search("(... (whereClause ...))", sql);
+// Match any of several table names
+PatternMatcher.Search("(relname {users orders products})", sql);
 
-// Find specific values deep in the AST
-PatternMatcher.Search("(... (whereClause ... 18))", "SELECT * FROM users WHERE age > 18");
-
-// Navigate to any level with ellipsis
-PatternMatcher.Search("(SelectStmt ... (targetList ...))", sql);
+// Match specific string values
+PatternMatcher.Search("(sval {admin user guest})", sql);
 ```
 
-#### **Flexible Pattern Types**
+#### **Nested Pattern Matching**
 ```csharp
-// Maybe patterns - optional matching
-PatternMatcher.Search("(SelectStmt (whereClause ?(A_Expr ...)))", sql);
+// Match table references with specific names
+PatternMatcher.Search("(RangeVar (relname \"users\"))", sql);
 
-// Not patterns - negation
-PatternMatcher.Search("(SelectStmt (targetList [(ResTarget (val !(A_Const (ival ...))))]))", sql);
-
-// Any patterns - match any of several options
-PatternMatcher.Search("(SelectStmt (fromClause [(RangeVar (relname {users orders}))]))", sql);
-
-// All patterns - match all conditions
-PatternMatcher.Search("[SelectStmt (whereClause ...)]", sql);
+// Match any table reference
+PatternMatcher.Search("(RangeVar (relname _))", sql);
 ```
 
-#### **🆕 Enhanced Attribute Pattern Matching**
-Attribute patterns support wildcards, negation, and sets:
 
-```csharp
-// Wildcard matching - matches ANY table name
-PatternMatcher.Search("(relname _)", "SELECT * FROM users");     // true
-PatternMatcher.Search("(relname _)", "SELECT * FROM posts");     // true
-
-// Negation matching - matches tables that are NOT "users"
-PatternMatcher.Search("(relname !users)", "SELECT * FROM users");   // false
-PatternMatcher.Search("(relname !users)", "SELECT * FROM posts");   // true
-
-// Set matching - match specific values
-PatternMatcher.Search("(relname {users posts})", "SELECT * FROM users");    // true
-PatternMatcher.Search("(relname {users posts})", "SELECT * FROM comments"); // false
-
-// Works with any attribute
-PatternMatcher.Search("(colname _)", sql);           // Any column name
-PatternMatcher.Search("(funcname {count sum avg})", sql); // Specific function names
-```
-
-#### **Capture and Search** ✨ **NEW**
-```csharp
-// Capture nodes for later analysis
-var sql = "SELECT name FROM users WHERE age > 18";
-var pattern = "($table (relname _))";
-var results = PatternMatcher.Search(pattern, sql);
-var captures = PatternMatcher.SearchWithCaptures(pattern, sql);
-var tableNode = captures["table"][0]; // The captured table node
-
-// Multiple captures in one pattern
-var complexPattern = "(SelectStmt $stmt ... (RangeVar (relname $table)) ... (whereClause $condition))";
-var allCaptures = PatternMatcher.SearchWithCaptures(complexPattern, sql);
-var statement = allCaptures["stmt"][0];     // The SelectStmt
-var tableName = allCaptures["table"][0];    // The table name
-var whereClause = allCaptures["condition"][0]; // The WHERE condition
-
-// Search for all matches
-var matches = PatternMatcher.Search("(A_Const (sval ...))", sql);
-// Returns all string constants in the query
-```
 
 ### 3. ⚙️ **Core Query Parsing**
 Parse PostgreSQL queries into an AST (Abstract Syntax Tree):
@@ -208,8 +153,8 @@ chmod +x grepsql.sh
 using GrepSQL.SQL;
 
 var sql = "SELECT name FROM users WHERE age > 18";
-var matches = PatternMatcher.Search("(... (whereClause ...))", sql);
-Console.WriteLine($"Found {matches.Count} WHERE clauses");
+var matches = PatternMatcher.Search("(relname _)", sql);
+Console.WriteLine($"Found {matches.Count} table references");
 ```
 
 ## 📖 **SQL Pattern Matching Syntax Reference**
@@ -315,79 +260,6 @@ Unlike simple string matching, our patterns navigate the **Abstract Syntax Tree 
 (... (A_Expr (name ">")))                     # Any > comparison
 ```
 
-### **6. Capture Patterns: `$variable`** ✨ **NEW**
-
-Capture matched nodes for later analysis and extraction:
-
-#### **Basic Capture Syntax**
-```bash
-# Named captures - store with a specific name
-$name                                     # Capture with name "name"
-$table                                    # Capture with name "table"
-$condition                                # Capture with name "condition"
-
-# Unnamed captures - store in default group
-$()                                       # Capture without specific name
-```
-
-#### **Capture Examples**
-```bash
-# Basic node capture
-(SelectStmt $stmt ...)                   # Capture the entire SELECT statement
-(A_Const (ival $number))                 # Capture integer constant value
-(RangeVar (relname $table))              # Capture table name node
-
-# Wildcard captures - capture any matching node
-($match _)                               # Capture any single node
-($table (relname _))                     # Capture any table reference
-
-# Multiple captures in one pattern
-($stmt SelectStmt) ($table (relname _))  # Capture both statement and table
-
-# Specific value captures
-($found (relname "users"))               # Capture when table is specifically "users"
-($admin (sval "admin"))                  # Capture when string is "admin"
-```
-
-#### **Command Line Usage**
-```bash
-# Extract captured values with --captures-only flag
-./grepsql.sh "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only
-# Output: [table]: Node
-
-# Multiple captures
-./grepsql.sh "(\$stmt _) (\$table (relname _))" --from-sql "SELECT * FROM products" --captures-only
-# Output: [stmt]: Node
-
-# Show tree structure of captured nodes
-./grepsql.sh "(\$table (relname _))" --from-sql "SELECT * FROM users" --captures-only --tree
-# Output: [table] + detailed AST tree structure
-```
-
-#### **C# API Usage**
-```csharp
-// Search with captures
-var sql = "SELECT name FROM users WHERE age > 18";
-var captures = PatternMatcher.SearchWithCaptures("($table (relname _))", sql);
-
-// Get captured nodes
-foreach (var captureGroup in captures)
-{
-    Console.WriteLine($"Capture '{captureGroup.Key}': {captureGroup.Value.Count} items");
-    foreach (var node in captureGroup.Value)
-    {
-        Console.WriteLine($"  - {node.Descriptor?.Name}");
-    }
-}
-
-// Named captures for complex analysis
-var pattern = "(SelectStmt $stmt ... (RangeVar (relname $table)) ... (whereClause $condition))";
-var allCaptures = PatternMatcher.SearchWithCaptures(pattern, sql);
-var statement = allCaptures["stmt"][0];     // The SelectStmt node
-var tableName = allCaptures["table"][0];    // The table name node  
-var whereClause = allCaptures["condition"][0]; // The WHERE condition
-```
-
 ## 📚 **API Reference**
 
 ### **PatternMatcher Class**
@@ -400,8 +272,7 @@ bool matches = PatternMatcher.Match(pattern, sql);
 // Search for all matching nodes
 List<IMessage> results = PatternMatcher.Search(pattern, sql);
 
-// Search with capture groups
-Dictionary<string, List<IMessage>> captures = PatternMatcher.SearchWithCaptures(pattern, sql);
+
 ```
 
 #### **Advanced Features**
@@ -424,7 +295,7 @@ var node = parseResult.ParseTree.Stmts[0].Stmt;
 
 bool matches = PatternMatcher.Match(node, pattern);
 List<IMessage> results = PatternMatcher.Search(node, pattern);
-Dictionary<string, List<IMessage>> captures = PatternMatcher.SearchWithCaptures(node, pattern);
+
 ```
 
 ### **Postgres Class**
@@ -470,7 +341,7 @@ The `grepsql.sh` script supports the following options:
 --tree                 Print AST as formatted tree
 --tree-mode            Tree display mode: clean (default) or full
 -c, --count            Only print count of matches
---captures-only        Print only captured nodes/values
+
 -X, --only-exp         Show only expression tree
 
 # Highlighting and formatting
@@ -499,26 +370,26 @@ The `grepsql.sh` script supports the following options:
 
 ### **Performance Analysis**
 ```bash
-# Find all table scans
-./grepsql.sh "(relname _)" *.sql --captures-only
+# Find all table references
+./grepsql.sh "(relname _)" *.sql
 
-# Find complex WHERE clauses
-./grepsql.sh "(whereClause ...)" *.sql --tree
+# Find all SELECT statements
+./grepsql.sh "SelectStmt" *.sql --tree
 ```
 
 ### **Code Quality**
 ```bash
 # Find magic numbers
-./grepsql.sh "(ival _)" *.sql --captures-only
+./grepsql.sh "(ival _)" *.sql
 
 # Find SELECT * patterns
-./grepsql.sh "(A_Star)" *.sql --highlight
+./grepsql.sh "A_Star" *.sql --highlight
 ```
 
 ### **Migration Planning**
 ```bash
 # Extract all table references
-./grepsql.sh "(\$table (relname _))" migration.sql --captures-only
+./grepsql.sh "(relname _)" migration.sql
 
 # Find schema references
 ./grepsql.sh "(schemaname _)" *.sql
