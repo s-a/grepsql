@@ -51,7 +51,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libdl-dev
+          sudo apt-get install -y build-essential libc6-dev
 
       - name: Run comprehensive build script (Unix)
         if: runner.os != 'Windows'
