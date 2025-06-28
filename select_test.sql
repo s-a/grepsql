@@ -1,1 +1,0 @@
-DO $$ SELECT * FROM users; $$;
