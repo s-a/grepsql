@@ -42,7 +42,7 @@ namespace PgQuery.NET.AST.Pattern
     }
 
     /// <summary>
-    /// AST Pattern Matcher with Ruby Fast-style pattern matching capabilities.
+    /// AST Pattern Matcher capabilities.
     /// Supports tokenizer-based parsing with unified Find-based class hierarchy.
     /// </summary>
     public static class Match

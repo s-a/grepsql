@@ -27,7 +27,7 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act
-            var results = Match.Search(parseResult.ParseTree, "SelectStmt", debug: true);
+            var results = Match.Search(parseResult.ParseTree, "SelectStmt", debug: false);
 
             // Assert
             Assert.NotEmpty(results);
@@ -44,7 +44,7 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act
-            var results = Match.Search(parseResult.ParseTree, "_", debug: true);
+            var results = Match.Search(parseResult.ParseTree, "_", debug: false);
 
             // Assert
             Assert.NotEmpty(results);
@@ -61,7 +61,7 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act
-            var results = Match.Search(parseResult.ParseTree, "...", debug: true);
+            var results = Match.Search(parseResult.ParseTree, "...", debug: false);
 
             // Assert
             Assert.NotEmpty(results);
@@ -77,7 +77,7 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act
-            var results = Match.Search(parseResult.ParseTree, "(SelectStmt ... (relname _))", debug: true);
+            var results = Match.Search(parseResult.ParseTree, "(SelectStmt ... (relname _))", debug: false);
 
             // Assert
             Assert.NotEmpty(results);
@@ -93,7 +93,7 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act
-            var results = Match.Search(parseResult.ParseTree, "(relname _)", debug: true);
+            var results = Match.Search(parseResult.ParseTree, "(relname _)", debug: false);
 
             // Assert
             Assert.NotEmpty(results);
@@ -109,7 +109,7 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act
-            var captures = Match.SearchWithCaptures(parseResult.ParseTree, "(relname $_)", debug: true);
+            var captures = Match.SearchWithCaptures(parseResult.ParseTree, "(relname $_)", debug: false);
 
             // Assert
             Assert.NotEmpty(captures);
@@ -128,7 +128,7 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act - Capture nodes that have either sval OR relname fields
-            var captures = Match.SearchWithCaptures(parseResult.ParseTree, "$({sval relname} _)", debug: true);
+            var captures = Match.SearchWithCaptures(parseResult.ParseTree, "$({sval relname} _)", debug: false);
 
             // Assert
             Assert.NotEmpty(captures);
@@ -246,7 +246,7 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act
-            var results = Match.Search(parseResult.ParseTree, pattern, debug: true);
+            var results = Match.Search(parseResult.ParseTree, pattern, debug: false);
 
             // Assert
             Assert.True(results.Count >= expectedMinCount, 
@@ -270,9 +270,9 @@ namespace PgQuery.NET.Tests.AST.Pattern
             var parseResult = PgQuery.Parse(sql);
 
             // Act
-            var selectResults = Match.Search(parseResult.ParseTree, "SelectStmt", debug: true);
-            var joinResults = Match.Search(parseResult.ParseTree, "JoinExpr", debug: true);
-            var relnameResults = Match.Search(parseResult.ParseTree, "(relname _)", debug: true);
+            var selectResults = Match.Search(parseResult.ParseTree, "SelectStmt", debug: false);
+            var joinResults = Match.Search(parseResult.ParseTree, "JoinExpr", debug: false);
+            var relnameResults = Match.Search(parseResult.ParseTree, "(relname _)", debug: false);
 
             // Assert
             Assert.NotEmpty(selectResults);
