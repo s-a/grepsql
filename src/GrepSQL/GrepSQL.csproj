@@ -6,9 +6,9 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <PackageId>GrepSQL.NET</PackageId>
+    <PackageId>GrepSQL</PackageId>
     <PackageVersion>0.0.1</PackageVersion>
-    <Title>GrepSQL.NET</Title>
+    <Title>GrepSQL</Title>
     <Authors>Jônatas Davi Paganini</Authors>
     <Description>
       A .NET wrapper for libpg_query - parse, normalize, and fingerprint PostgreSQL queries using the actual PostgreSQL parser.

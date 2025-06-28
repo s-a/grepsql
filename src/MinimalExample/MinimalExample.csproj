@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GrepSQL.NET\GrepSQL.NET.csproj" />
+    <ProjectReference Include="..\GrepSQL\GrepSQL.csproj" />
   </ItemGroup>
 
 </Project> 
