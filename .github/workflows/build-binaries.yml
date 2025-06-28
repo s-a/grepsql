@@ -47,6 +47,12 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libdl-dev
+
       - name: Run comprehensive build script (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -70,7 +76,9 @@ jobs:
           
           REM Create placeholder directory structure
           mkdir "src\GrepSQL\runtimes\win-x64\native" 2>nul
-          echo Windows native library placeholder > "src\GrepSQL\runtimes\win-x64\native\placeholder.txt"
+          
+          REM Create a minimal dummy DLL to satisfy the .NET runtime
+          echo. > "src\GrepSQL\runtimes\win-x64\native\libpgquery_wrapper.dll"
           
           REM Build .NET project only
           dotnet restore
