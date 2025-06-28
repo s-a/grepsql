@@ -3,10 +3,10 @@ using System.Linq;
 using Xunit;
 using Xunit.Abstractions;
 using PgQuery.NET;
-using PgQuery.NET.AST.Pattern;
+using PgQuery.NET.Patterns;
 using PgQuery.NET.SQL;
 
-namespace PgQuery.NET.Tests.AST.Pattern
+namespace PgQuery.NET.Tests.Patterns
 {
     public class CorePatternTests
     {

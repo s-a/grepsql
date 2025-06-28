@@ -1,6 +1,6 @@
 # PgQuery.NET
 
-A comprehensive .NET wrapper for libpg_query, providing PostgreSQL query parsing and advanced SQL pattern matching capabilities.
+A comprehensive .NET wrapper for libpg_query, providing PostgreSQL query parsing and advanced SQL pattern matching capabilities with a **clean, object-oriented architecture**.
 
 ## 📦 Quick Install
 
@@ -28,7 +28,6 @@ chmod +x GrepSQL
 ```bash
 dotnet add package PgQuery.NET
 ```
-
 ## Features
 
 ### 1. 🔍 **GrepSQL - Command Line Tool**
@@ -527,20 +526,15 @@ The `grepsql.sh` script supports the following options:
 
 ## 🏗️ **Architecture**
 
-- **Core**: libpg_query for PostgreSQL parsing
-- **Pattern Engine**: Custom s-expression parser with Find-based class hierarchy
-- **API Layers**: 
-  - Low-level: `PgQuery.NET.AST.Pattern.Match`
-  - High-level: `PgQuery.NET.SQL.PatternMatcher`
-  - CLI: `GrepSQL` command-line tool
+
+
 
 ## 🤝 **Contributing**
 
+We welcome contributions! Our codebase follows modern .NET development practices.
+
+### **Development Setup**
 1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass: `dotnet test`
-5. Submit a pull request
 
 ## 📄 **License**
 

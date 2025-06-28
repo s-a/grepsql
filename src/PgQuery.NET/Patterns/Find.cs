@@ -4,7 +4,7 @@ using System.Linq;
 using Google.Protobuf;
 using PgQuery.NET.AST;
 
-namespace PgQuery.NET.AST.Pattern
+namespace PgQuery.NET.Patterns
 {
     /// <summary>
     /// Strategy interface for different node matching approaches.
@@ -270,7 +270,7 @@ namespace PgQuery.NET.AST.Pattern
             var results = new List<IMessage>();
             SearchRecursive(rootNode, results, debug);
             
-            Pattern.DebugLogger.Instance.Log($"Found {results.Count} matches for pattern: {this}");
+            DebugLogger.Instance.Log($"Found {results.Count} matches for pattern: {this}");
             
             return results;
         }
@@ -291,7 +291,7 @@ namespace PgQuery.NET.AST.Pattern
             // Extract captures from this expression
             var captures = GetCaptures();
             
-            Pattern.DebugLogger.Instance.Log($"Found {results.Count} matches with {captures.Count} captures for pattern: {this}");
+            DebugLogger.Instance.Log($"Found {results.Count} matches with {captures.Count} captures for pattern: {this}");
             
             return captures;
         }
@@ -304,7 +304,7 @@ namespace PgQuery.NET.AST.Pattern
             if (Match(node))
             {
                 results.Add(node);
-                Pattern.DebugLogger.Instance.Log($"Match found: {node.GetType().Name}");
+                DebugLogger.Instance.Log($"Match found: {node.GetType().Name}");
             }
 
             // Search children using the iterator utility

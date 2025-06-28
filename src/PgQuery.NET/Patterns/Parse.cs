@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 using Google.Protobuf;
 using PgQuery.NET.AST;
 
-namespace PgQuery.NET.AST.Pattern
+namespace PgQuery.NET.Patterns
 {
     /// <summary>
     /// Global debug logger singleton for pattern matching operations.

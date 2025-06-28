@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Google.Protobuf;
 using Google.Protobuf.Reflection;
-using PatternMatch = PgQuery.NET.AST.Pattern.Match;
+using PatternMatch = PgQuery.NET.Patterns.Match;
 
 namespace PgQuery.NET.SQL
 {
