@@ -99,7 +99,7 @@ jobs:
         \`\`\`
         
         ### 📚 Documentation
-        See the [README](https://github.com/jonatas/pgquery-dotnet#readme) for full documentation and examples.
+        See the [README](https://github.com/jonatas/grepsql#readme) for full documentation and examples.
         EOF
 
     - name: Commit version updates

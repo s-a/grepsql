@@ -292,9 +292,9 @@ jobs:
           $COMMITS
           
           ### 📚 Documentation
-          - [Full Documentation](https://github.com/jonatas/pgquery-dotnet#readme)
-          - [Pattern Language Guide](https://github.com/jonatas/pgquery-dotnet/blob/main/src/GrepSQL/README.md)
-          - [SQL Highlighting Examples](https://github.com/jonatas/pgquery-dotnet/blob/main/src/GrepSQL/README.md#sql-highlighting-examples)
+          - [Full Documentation](https://github.com/jonatas/grepsql#readme)
+          - [Pattern Language Guide](https://github.com/jonatas/grepsql/blob/main/src/GrepSQL/README.md)
+          - [SQL Highlighting Examples](https://github.com/jonatas/grepsql/blob/main/src/GrepSQL/README.md#sql-highlighting-examples)
           EOF
           else
             # For main branch builds

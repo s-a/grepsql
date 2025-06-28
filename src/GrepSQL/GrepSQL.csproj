@@ -17,7 +17,7 @@
       Uses protobuf to serialize and deserialize the AST.
     </Description>
     <PackageTags>postgresql;sql;parser;search;grep;cli;libpg_query;pgquery;ast;query;analysis;pattern;matching;find;replace;rewrite</PackageTags>
-    <RepositoryUrl>https://github.com/jonatas/pgquery-dotnet</RepositoryUrl>
+    <RepositoryUrl>https://github.com/jonatas/grepsql</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>

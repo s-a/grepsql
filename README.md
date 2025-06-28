@@ -5,7 +5,7 @@ A comprehensive .NET wrapper for libpg_query, providing PostgreSQL query parsing
 ## 📦 Quick Install
 
 ### Pre-built Binaries (Recommended)
-Download ready-to-use binaries from [GitHub Releases](https://github.com/jonatas/pgquery-dotnet/releases):
+Download ready-to-use binaries from [GitHub Releases](https://github.com/jonatas/grepsql/releases):
 
 - **Linux (x64)**: `grepsql-linux-x64.tar.gz`
 - **macOS (Intel)**: `grepsql-osx-x64.tar.gz` 
@@ -14,7 +14,7 @@ Download ready-to-use binaries from [GitHub Releases](https://github.com/jonatas
 
 ```bash
 # Download and extract (example for Linux)
-wget https://github.com/jonatas/pgquery-dotnet/releases/latest/download/grepsql-linux-x64.tar.gz
+wget https://github.com/jonatas/grepsql/releases/latest/download/grepsql-linux-x64.tar.gz
 tar -xzf grepsql-linux-x64.tar.gz
 chmod +x GrepSQL
 
@@ -185,8 +185,8 @@ catch (PgQueryException ex)
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/jonatas/pgquery-dotnet.git
-cd pgquery-dotnet
+git clone https://github.com/jonatas/grepsql.git
+cd grepsql
 ```
 
 2. Build the project:
