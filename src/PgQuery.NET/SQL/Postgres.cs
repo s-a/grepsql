@@ -97,6 +97,63 @@ namespace PgQuery.NET.SQL
             "pubname", "subname", "publication", "subscription"
         };
 
+        /// <summary>
+        /// Comprehensive set of PostgreSQL AST node type names used for pattern matching.
+        /// </summary>
+        public static readonly HashSet<string> NodeTypeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Statement-level nodes
+            "SelectStmt", "InsertStmt", "UpdateStmt", "DeleteStmt", "CreateStmt", "DropStmt",
+            "AlterStmt", "TruncateStmt", "CopyStmt", "TransactionStmt", "ViewStmt", "IndexStmt",
+            "RuleStmt", "CreateTableAsStmt", "RefreshMatViewStmt", "VariableSetStmt", "VariableShowStmt",
+            "DoStmt", "CreateRoleStmt", "AlterRoleStmt", "DropRoleStmt", "CreatedbStmt", "AlterDatabaseStmt",
+            "DropdbStmt", "VacuumStmt", "ExplainStmt", "CreateSeqStmt", "AlterSeqStmt", "VariableSetStmt",
+            "NotifyStmt", "ListenStmt", "UnlistenStmt", "CommentStmt", "FetchStmt", "CheckPointStmt",
+            "DiscardStmt", "LockStmt", "ConstraintsSetStmt", "ReindexStmt", "CreateConversionStmt",
+            "CreateCastStmt", "CreateOpClassStmt", "CreateOpFamilyStmt", "AlterOpFamilyStmt", "PrepareStmt",
+            "ExecuteStmt", "DeallocateStmt", "DeclareCursorStmt", "CreateTableSpaceStmt", "DropTableSpaceStmt",
+            "AlterObjectDependsStmt", "AlterObjectSchemaStmt", "AlterOwnerStmt", "AlterOperatorStmt",
+            "RenameStmt", "RuleStmt", "CreateForeignTableStmt", "ImportForeignSchemaStmt", "CreateExtensionStmt",
+            "AlterExtensionStmt", "AlterExtensionContentsStmt", "CreateFdwStmt", "AlterFdwStmt", "CreateForeignServerStmt",
+            "AlterForeignServerStmt", "CreateUserMappingStmt", "AlterUserMappingStmt", "DropUserMappingStmt",
+            "AlterTableStmt", "AlterTableCmd", "AlterDomainStmt", "SetOperationStmt", "GrantStmt", "GrantRoleStmt",
+            "AlterDefaultPrivilegesStmt", "ClosePortalStmt", "ClusterStmt", "CopyStmt", "CreateStmt", "DefineStmt",
+            "CreateDomainStmt", "CreateFunctionStmt", "AlterFunctionStmt", "CreatePLangStmt", "CreateSchemaStmt",
+            "CreateTrigStmt", "CreateEventTrigStmt", "AlterEventTrigStmt", "RefreshMatViewStmt", "ReplicaIdentityStmt",
+            "AlterSystemStmt", "CreatePolicyStmt", "AlterPolicyStmt", "CreateTransformStmt", "CreateAmStmt",
+            "CreatePublicationStmt", "AlterPublicationStmt", "CreateSubscriptionStmt", "AlterSubscriptionStmt",
+            "DropSubscriptionStmt", "CreateStatsStmt", "AlterCollationStmt", "CallStmt", "AlterStatsStmt",
+            
+            // Expression-level nodes
+            "A_Const", "A_Expr", "A_Indirection", "A_ArrayExpr", "A_Star", "Alias", "RangeVar", "ColumnRef",
+            "FuncCall", "BoolExpr", "CaseExpr", "CaseWhen", "CaseTestExpr", "SubLink", "SubPlan", "AlternativeSubPlan",
+            "FieldSelect", "FieldStore", "RelabelType", "CoerceViaIO", "ArrayCoerceExpr", "ConvertRowtypeExpr",
+            "CollateExpr", "MinMaxExpr", "SQLValueFunction", "XmlExpr", "NullTest", "BooleanTest", "CoerceToDomain",
+            "CoerceToDomainValue", "SetToDefault", "CurrentOfExpr", "NextValueExpr", "InferenceElem", "TargetEntry",
+            "RangeTblRef", "FromExpr", "OnConflictExpr", "Query", "PlannedStmt", "Result", "ProjectSet", "ModifyTable",
+            "Append", "MergeAppend", "RecursiveUnion", "BitmapAnd", "BitmapOr", "SeqScan", "SampleScan", "IndexScan",
+            "IndexOnlyScan", "BitmapIndexScan", "BitmapHeapScan", "TidScan", "SubqueryScan", "FunctionScan",
+            "ValuesScan", "TableFuncScan", "CteScan", "NamedTuplestoreScan", "WorkTableScan", "ForeignScan",
+            "CustomScan", "NestLoop", "MergeJoin", "HashJoin", "Material", "Sort", "IncrementalSort", "Group",
+            "Agg", "WindowAgg", "Unique", "Gather", "GatherMerge", "Hash", "SetOp", "LockRows", "Limit",
+            
+            "JoinExpr", "TypeName", "TypeCast", "ResTarget", "SortBy", "WindowDef", "RangeSubselect", "RangeFunction",
+            "RangeTableSample", "RangeTableFunc", "CommonTableExpr", "WithClause", "InferClause", "OnConflictClause",
+            "GroupingSet", "WindowClause", "PartitionElem", "PartitionSpec", "PartitionBoundSpec", "PartitionRangeDatum",
+            "CreateTableAsStmt", "IntoClause", "Constraint", "DefElem", "RangeTblEntry", "RangeTblFunction", "TableSampleClause",
+            
+            // General AST nodes
+            "Node", "List", "Value", "Integer", "Float", "String", "BitString", "Null", "ParseResult", "RawStmt",
+            
+            // Planner and executor nodes 
+            "PlannedStmt", "Plan", "Result", "ProjectSet", "ModifyTable", "Append", "MergeAppend", "RecursiveUnion",
+            "BitmapAnd", "BitmapOr", "Scan", "SeqScan", "SampleScan", "IndexScan", "IndexOnlyScan", "BitmapIndexScan",
+            "BitmapHeapScan", "TidScan", "SubqueryScan", "FunctionScan", "ValuesScan", "TableFuncScan", "CteScan",
+            "NamedTuplestoreScan", "WorkTableScan", "ForeignScan", "CustomScan", "Join", "NestLoop", "MergeJoin",
+            "HashJoin", "Material", "Sort", "IncrementalSort", "Group", "Agg", "WindowAgg", "Unique", "Gather",
+            "GatherMerge", "Hash", "SetOp", "LockRows", "Limit"
+        };
+
         private static bool _debugEnabled = false;
 
         /// <summary>
@@ -240,6 +297,16 @@ namespace PgQuery.NET.SQL
         public static bool IsKnownAttribute(string attributeName)
         {
             return AttributeNames.Contains(attributeName);
+        }
+
+        /// <summary>
+        /// Check if a given name is a known PostgreSQL AST node type.
+        /// </summary>
+        /// <param name="nodeTypeName">The node type name to check</param>
+        /// <returns>True if the name is a known PostgreSQL AST node type</returns>
+        public static bool IsKnownNodeType(string nodeTypeName)
+        {
+            return NodeTypeNames.Contains(nodeTypeName);
         }
 
         // ==================== SQL-SPECIFIC PATTERN MATCHING ====================

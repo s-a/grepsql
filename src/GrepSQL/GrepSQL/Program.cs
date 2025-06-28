@@ -422,6 +422,15 @@ namespace GrepSQL
                         continue;
                     }
 
+                    // Show AST tree when debugging to help understand structure
+                    if (debug)
+                    {
+                        Console.Error.WriteLine($"[DEBUG] ======== SQL: {sql} ========");
+                        Console.Error.WriteLine($"[DEBUG] ======== AST Tree Structure ========");
+                        TreePrinter.PrintTree(parseResult.ParseTree, TreePrinter.SupportsColors(), 15, TreePrinter.NodeStatus.Normal, TreePrinter.TreeMode.Full);
+                        Console.Error.WriteLine($"[DEBUG] ======== Pattern Matching: {pattern} ========");
+                    }
+
                     // Use PatternMatcher.Search which delegates to Postgres.SearchInSql
                     var results = PatternMatcher.Search(pattern, sql, debug);
                     

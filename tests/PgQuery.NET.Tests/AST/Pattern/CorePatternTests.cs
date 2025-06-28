@@ -217,6 +217,17 @@ namespace PgQuery.NET.Tests.AST.Pattern
             // Assert
             Assert.NotEmpty(captures);
             Assert.Contains("default", captures.Keys);
+            
+            // Debug output to understand the issue
+            _output.WriteLine($"SQL: {sql}");
+            _output.WriteLine($"Pattern: (relname $_)");
+            _output.WriteLine($"Total capture groups: {captures.Count}");
+            _output.WriteLine($"Captures in 'default' group: {captures["default"].Count}");
+            for (int i = 0; i < captures["default"].Count; i++)
+            {
+                _output.WriteLine($"  [{i}]: '{captures["default"][i]}'");
+            }
+            
             Assert.Equal("a", captures["default"][0].ToString());
             Assert.Equal("b", captures["default"][1].ToString());
             Assert.Equal("c", captures["default"][2].ToString());
