@@ -110,21 +110,22 @@ if [ -f "libpgquery_wrapper.$LIBRARY_EXT" ]; then
     cp "libpgquery_wrapper.$LIBRARY_EXT" "src/GrepSQL/runtimes/$TARGET_RID/native/"
 fi
 
-# Step 4: Generate protobuf files
-echo "🔧 Generating protobuf files..."
-chmod +x scripts/generate_protos.sh
+# Step 4: Generate protobuf files (if needed)
+echo "🔧 Checking protobuf files..."
 if [ ! -f "src/GrepSQL/AST/Generated/PgQuery.g.cs" ]; then
     echo "Protobuf files not found, running generation..."
+    chmod +x scripts/generate_protos.sh
     ./scripts/generate_protos.sh
-    ls -la src/GrepSQL/AST/Generated/ || echo "Directory doesn't exist"
-fi
-
-# Step 5: Verify protobuf generation
-if [ ! -f "src/GrepSQL/AST/Generated/PgQuery.g.cs" ]; then
-    echo "❌ Protobuf generation failed or files not found"
-    echo "Attempting to list generated files:"
-    ls -la src/GrepSQL/AST/Generated/ || echo "Directory doesn't exist"
-    exit 1
+    
+    # Verify generation was successful
+    if [ ! -f "src/GrepSQL/AST/Generated/PgQuery.g.cs" ]; then
+        echo "❌ Protobuf generation failed"
+        echo "This might be due to missing protoc compiler."
+        echo "Please run 'scripts/generate_protos.sh' locally and commit the generated files."
+        exit 1
+    fi
+else
+    echo "✅ Protobuf files already exist, skipping generation"
 fi
 
 # Step 6: Build .NET project
