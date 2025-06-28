@@ -258,14 +258,7 @@ jobs:
         dotnet-version: ${{ env.DOTNET_FRAMEWORK_VERSION }}
 
     - name: Publish GrepSQL for ${{ matrix.runtime }}
-      run: |
-        dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj \
-          --configuration Release \
-          --runtime ${{ matrix.runtime }} \
-          --self-contained true \
-          --output ./dist/${{ matrix.runtime }} \
-          -p:PublishSingleFile=true \
-          -p:IncludeNativeLibrariesForSelfExtract=true
+      run: dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj --configuration Release --runtime ${{ matrix.runtime }} --self-contained true --output ./dist/${{ matrix.runtime }} -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 
     - name: Create archive
       shell: bash
