@@ -53,7 +53,7 @@ jobs:
         sed -i 's/<FileVersion>.*<\/FileVersion>/<FileVersion>${{ github.event.inputs.version }}<\/FileVersion>/' src/GrepSQL/GrepSQL.csproj
         
         # Update GrepSQL version
-        sed -i 's/<Version>.*<\/Version>/<Version>${{ github.event.inputs.version }}<\/Version>/' src/GrepSQL/GrepSQL/GrepSQL.csproj
+        sed -i 's/<Version>.*<\/Version>/<Version>${{ github.event.inputs.version }}<\/Version>/' src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj
 
     - name: Build and test
       run: |

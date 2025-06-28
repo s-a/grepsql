@@ -259,7 +259,7 @@ jobs:
 
     - name: Publish GrepSQL for ${{ matrix.runtime }}
       run: |
-        dotnet publish src/GrepSQL/GrepSQL/GrepSQL.csproj \
+        dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj \
           --configuration Release \
           --runtime ${{ matrix.runtime }} \
           --self-contained true \

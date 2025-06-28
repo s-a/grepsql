@@ -21,10 +21,10 @@ A powerful CLI tool for searching and filtering SQL files using pattern expressi
 
 ```bash
 # Build the native macOS binary (self-contained, no .NET runtime required)
-dotnet publish src/GrepSQL/GrepSQL/GrepSQL.csproj -c Release -o bin --self-contained true -r osx-arm64
+dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj -c Release -o bin --self-contained true -r osx-arm64
 
 # Or run in development mode
-dotnet run --project src/GrepSQL/GrepSQL/GrepSQL.csproj -- [options]
+dotnet run --project src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj -- [options]
 
 # The native binary is located at ./bin/GrepSQL
 # Use the wrapper script: ./grepsql.sh

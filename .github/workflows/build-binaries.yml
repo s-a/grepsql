@@ -155,7 +155,7 @@ jobs:
 
       - name: Publish GrepSQL Binary
         run: |
-          dotnet publish src/GrepSQL/GrepSQL/GrepSQL.csproj \
+          dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj \
             --configuration Release \
             --runtime ${{ matrix.platform }} \
             --self-contained true \
