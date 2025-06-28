@@ -7,6 +7,221 @@ using PgQuery.NET.AST;
 namespace PgQuery.NET.AST.Pattern
 {
     /// <summary>
+    /// Strategy interface for different node matching approaches.
+    /// </summary>
+    public interface IMatchingStrategy
+    {
+        bool Match(IMessage node, string? nodeType);
+    }
+
+    /// <summary>
+    /// Matches nodes by their type name.
+    /// </summary>
+    public class NodeTypeMatchingStrategy : IMatchingStrategy
+    {
+        public bool Match(IMessage node, string? nodeType)
+        {
+            return string.IsNullOrEmpty(nodeType) || node?.GetType().Name == nodeType;
+        }
+    }
+
+    /// <summary>
+    /// Matches nodes by checking if they have a specific field.
+    /// </summary>
+    public class FieldMatchingStrategy : IMatchingStrategy
+    {
+        public bool Match(IMessage node, string? fieldName)
+        {
+            return !string.IsNullOrEmpty(fieldName) && FieldAccessor.HasField(node, fieldName);
+        }
+    }
+
+    /// <summary>
+    /// Factory for creating appropriate matching strategies.
+    /// </summary>
+    public static class MatchingStrategyFactory
+    {
+        private static readonly IMatchingStrategy NodeTypeStrategy = new NodeTypeMatchingStrategy();
+        private static readonly IMatchingStrategy FieldStrategy = new FieldMatchingStrategy();
+
+        public static IMatchingStrategy GetStrategy(string? nodeType)
+        {
+            if (string.IsNullOrEmpty(nodeType))
+                return NodeTypeStrategy;
+                
+            return SQL.Postgres.IsKnownAttribute(nodeType) 
+                ? FieldStrategy 
+                : NodeTypeStrategy;
+        }
+    }
+
+    /// <summary>
+    /// Utility class for accessing protobuf message fields in a consistent way.
+    /// </summary>
+    public static class FieldAccessor
+    {
+        public static bool HasField(IMessage node, string fieldName)
+        {
+            if (node == null) return false;
+            
+            // FieldValueWrapper doesn't have protobuf descriptor
+            if (node is FieldValueWrapper)
+                return false;
+            
+            var descriptor = node.Descriptor;
+            var field = descriptor.Fields.InDeclarationOrder()
+                .FirstOrDefault(f => string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+            
+            if (field != null)
+            {
+                var value = field.Accessor.GetValue(node);
+                return value != null && !IsEmptyValue(value);
+            }
+            
+            return false;
+        }
+
+        public static object? GetFieldValue(IMessage node, string fieldName)
+        {
+            if (node == null) return null;
+            
+            var descriptor = node.Descriptor;
+            var field = descriptor.Fields.InDeclarationOrder()
+                .FirstOrDefault(f => string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+            
+            return field?.Accessor.GetValue(node);
+        }
+
+        private static bool IsEmptyValue(object value)
+        {
+            if (value is string str) return string.IsNullOrEmpty(str);
+            if (value is System.Collections.ICollection collection) return collection.Count == 0;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Iterator for protobuf message fields that handles both single and repeated fields.
+    /// </summary>
+    public static class ProtobufNodeIterator
+    {
+        public delegate void NodeAction(IMessage node);
+        public delegate bool NodePredicate(IMessage node);
+
+        /// <summary>
+        /// Iterate through all child nodes of a protobuf message.
+        /// </summary>
+        public static void ForEachChild(IMessage node, NodeAction action)
+        {
+            if (node == null) return;
+
+            var descriptor = node.Descriptor;
+            foreach (var field in descriptor.Fields.InDeclarationOrder())
+            {
+                var value = field.Accessor.GetValue(node);
+                
+                if (value == null) continue;
+                
+                // Handle single IMessage fields
+                if (value is IMessage childMessage)
+                {
+                    action(childMessage);
+                }
+                // Handle repeated fields (collections)
+                else if (value is System.Collections.IEnumerable enumerable)
+                {
+                    foreach (var item in enumerable)
+                    {
+                        if (item is IMessage itemMessage)
+                        {
+                            action(itemMessage);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Find first child node that matches the predicate.
+        /// </summary>
+        public static IMessage? FindChild(IMessage node, NodePredicate predicate)
+        {
+            if (node == null) return null;
+
+            var descriptor = node.Descriptor;
+            foreach (var field in descriptor.Fields.InDeclarationOrder())
+            {
+                var value = field.Accessor.GetValue(node);
+                
+                if (value == null) continue;
+                
+                // Handle single IMessage fields
+                if (value is IMessage childMessage)
+                {
+                    if (predicate(childMessage))
+                        return childMessage;
+                }
+                // Handle repeated fields (collections)
+                else if (value is System.Collections.IEnumerable enumerable)
+                {
+                    foreach (var item in enumerable)
+                    {
+                        if (item is IMessage itemMessage && predicate(itemMessage))
+                        {
+                            return itemMessage;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Check if any child node matches the predicate.
+        /// </summary>
+        public static bool AnyChild(IMessage node, NodePredicate predicate)
+        {
+            return FindChild(node, predicate) != null;
+        }
+
+        /// <summary>
+        /// Get all child nodes that match the predicate.
+        /// </summary>
+        public static List<IMessage> GetChildren(IMessage node, NodePredicate predicate)
+        {
+            var results = new List<IMessage>();
+            if (node == null) return results;
+
+            var descriptor = node.Descriptor;
+            foreach (var field in descriptor.Fields.InDeclarationOrder())
+            {
+                var value = field.Accessor.GetValue(node);
+                
+                if (value == null) continue;
+                
+                // Handle single IMessage fields
+                if (value is IMessage childMessage)
+                {
+                    if (predicate(childMessage))
+                        results.Add(childMessage);
+                }
+                // Handle repeated fields (collections)
+                else if (value is System.Collections.IEnumerable enumerable)
+                {
+                    foreach (var item in enumerable)
+                    {
+                        if (item is IMessage itemMessage && predicate(itemMessage))
+                        {
+                            results.Add(itemMessage);
+                        }
+                    }
+                }
+            }
+            return results;
+        }
+    }
+
+    /// <summary>
     /// Base class for all pattern matching expressions.
     /// Implements Ruby Fast-style pattern matching with unified Find-based hierarchy.
     /// Contains the core search and matching logic that all patterns inherit.
@@ -14,7 +229,7 @@ namespace PgQuery.NET.AST.Pattern
     public class Find
     {
         public List<Find> Conditions { get; } = new List<Find>();
-        public Dictionary<string, List<IMessage>> Captures { get; } = new Dictionary<string, List<IMessage>>();
+        public List<object> Captures { get; } = new List<object>();
 
         protected readonly string? _nodeType;
         
@@ -65,8 +280,8 @@ namespace PgQuery.NET.AST.Pattern
         /// </summary>
         /// <param name="rootNode">Root node to search in</param>
         /// <param name="debug">Enable debug output</param>
-        /// <returns>Dictionary of captured nodes by name</returns>
-        public Dictionary<string, List<IMessage>> SearchWithCaptures(IMessage rootNode, bool debug = false)
+        /// <returns>List of captured objects</returns>
+        public List<object> SearchWithCaptures(IMessage rootNode, bool debug = false)
         {
             if (rootNode == null) throw new ArgumentNullException(nameof(rootNode));
 
@@ -76,7 +291,7 @@ namespace PgQuery.NET.AST.Pattern
             // Extract captures from this expression
             var captures = GetCaptures();
             
-            Pattern.DebugLogger.Instance.Log($"Found {results.Count} matches with {captures.Count} capture groups for pattern: {this}");
+            Pattern.DebugLogger.Instance.Log($"Found {results.Count} matches with {captures.Count} captures for pattern: {this}");
             
             return captures;
         }
@@ -92,31 +307,8 @@ namespace PgQuery.NET.AST.Pattern
                 Pattern.DebugLogger.Instance.Log($"Match found: {node.GetType().Name}");
             }
 
-            // Search children using protobuf reflection
-            var descriptor = node.Descriptor;
-            foreach (var field in descriptor.Fields.InDeclarationOrder())
-            {
-                var value = field.Accessor.GetValue(node);
-                
-                if (value == null) continue;
-                
-                // Handle single IMessage fields
-                if (value is IMessage childMessage)
-                {
-                    SearchRecursive(childMessage, results, debug);
-                }
-                // Handle repeated fields (collections)
-                else if (value is System.Collections.IEnumerable enumerable)
-                {
-                    foreach (var item in enumerable)
-                    {
-                        if (item is IMessage itemMessage)
-                        {
-                            SearchRecursive(itemMessage, results, debug);
-                        }
-                    }
-                }
-            }
+            // Search children using the iterator utility
+            ProtobufNodeIterator.ForEachChild(node, child => SearchRecursive(child, results, debug));
         }
 
         public virtual bool Match(IMessage node)
@@ -136,19 +328,8 @@ namespace PgQuery.NET.AST.Pattern
 
         public virtual bool MatchCondition(IMessage node)
         {
-            if (!string.IsNullOrEmpty(_nodeType))
-            {
-                // Check if this is a field name (attribute) rather than a node type
-                if (SQL.Postgres.IsKnownAttribute(_nodeType))
-                {
-                    return HasField(node, _nodeType);
-                }
-                else
-                {
-                    return node?.GetType().Name == _nodeType;
-                }
-            }
-            return true; // Base implementation always matches
+            var strategy = MatchingStrategyFactory.GetStrategy(_nodeType);
+            return strategy.Match(node, _nodeType);
         }
 
         /// <summary>
@@ -160,43 +341,10 @@ namespace PgQuery.NET.AST.Pattern
             if (!string.IsNullOrEmpty(_nodeType) && SQL.Postgres.IsKnownAttribute(_nodeType))
             {
                 // For field patterns, return the field value
-                return GetFieldValue(node, _nodeType) ?? node;
+                return FieldAccessor.GetFieldValue(node, _nodeType) ?? node;
             }
             // For other patterns, return the node itself
             return node;
-        }
-
-        private bool IsKnownAttribute(string name)
-        {
-            return SQL.Postgres.AttributeNames.Contains(name);
-        }
-
-        protected bool HasField(IMessage node, string fieldName)
-        {
-            if (node == null) return false;
-            
-            // FieldValueWrapper doesn't have protobuf descriptor
-            if (node is FieldValueWrapper)
-                return false;
-            
-            var descriptor = node.Descriptor;
-            var field = descriptor.Fields.InDeclarationOrder()
-                .FirstOrDefault(f => string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
-            
-            if (field != null)
-            {
-                var value = field.Accessor.GetValue(node);
-                return value != null && !IsEmptyValue(value);
-            }
-            
-            return false;
-        }
-
-        private bool IsEmptyValue(object value)
-        {
-            if (value is string str) return string.IsNullOrEmpty(str);
-            if (value is System.Collections.ICollection collection) return collection.Count == 0;
-            return false;
         }
 
         public bool IsFieldPattern(out string fieldName)
@@ -215,17 +363,6 @@ namespace PgQuery.NET.AST.Pattern
             return _nodeType;
         }
 
-        protected object? GetFieldValue(IMessage node, string fieldName)
-        {
-            if (node == null) return null;
-            
-            var descriptor = node.Descriptor;
-            var field = descriptor.Fields.InDeclarationOrder()
-                .FirstOrDefault(f => string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
-            
-            return field?.Accessor.GetValue(node);
-        }
-
         protected virtual bool MatchConditions(IMessage node)
         {
             // For compound Find patterns, use AND logic - all conditions must match
@@ -237,86 +374,63 @@ namespace PgQuery.NET.AST.Pattern
         /// </summary>
         protected bool FindInChildren(IMessage node, Find condition)
         {
-            var results = new List<IMessage>();
-            SearchChildrenRecursive(node, results, condition);
-            return results.Count > 0;
+            return SearchChildrenRecursive(node, condition);
         }
 
         /// <summary>
         /// Recursively search children nodes for matches.
         /// </summary>
-        protected void SearchChildrenRecursive(IMessage node, List<IMessage> results, Find condition)
+        protected bool SearchChildrenRecursive(IMessage node, Find condition)
         {
-            if (node == null) return;
+            if (node == null) return false;
 
-            // Search children using protobuf reflection
-            var descriptor = node.Descriptor;
-            foreach (var field in descriptor.Fields.InDeclarationOrder())
+            // Use the iterator utility to search children
+            return ProtobufNodeIterator.AnyChild(node, child =>
             {
-                var value = field.Accessor.GetValue(node);
+                // Check if condition matches this child
+                if (condition.Match(child))
+                    return true;
                 
-                if (value == null) continue;
-                
-                // Handle single IMessage fields
-                if (value is IMessage childMessage)
-                {
-                    // Check if condition matches this child
-                    if (condition.Match(childMessage))
-                    {
-                        results.Add(childMessage);
-                        return; // Found a match, can return early for HasChildren use case
-                    }
-                    // Recursively search deeper children
-                    SearchChildrenRecursive(childMessage, results, condition);
-                    if (results.Count > 0) return; // Early exit for performance
-                }
-                // Handle repeated fields (collections)
-                else if (value is System.Collections.IEnumerable enumerable)
-                {
-                    foreach (var item in enumerable)
-                    {
-                        if (item is IMessage itemMessage)
-                        {
-                            // Check if condition matches this child
-                            if (condition.Match(itemMessage))
-                            {
-                                results.Add(itemMessage);
-                                return; // Found a match, can return early
-                            }
-                            // Recursively search deeper children
-                            SearchChildrenRecursive(itemMessage, results, condition);
-                            if (results.Count > 0) return; // Early exit for performance
-                        }
-                    }
-                }
+                // Recursively search deeper children
+                return SearchChildrenRecursive(child, condition);
+            });
+        }
+
+        /// <summary>
+        /// Propagate captures from matching conditions to this expression.
+        /// </summary>
+        protected void PropagateCaptures(IEnumerable<Find> matchingConditions)
+        {
+            foreach (var condition in matchingConditions)
+            {
+                var conditionCaptures = condition.GetCaptures();
+                Captures.AddRange(conditionCaptures);
             }
         }
 
-        public virtual Dictionary<string, List<IMessage>> GetCaptures()
+        public virtual List<object> GetCaptures()
         {
-            var result = new Dictionary<string, List<IMessage>>(Captures);
+            var result = new List<object>(Captures);
             
             // Merge captures from conditions
             foreach (var condition in Conditions)
             {
                 var conditionCaptures = condition.GetCaptures();
-                foreach (var kvp in conditionCaptures)
-                {
-                    if (result.ContainsKey(kvp.Key))
-                    {
-                        result[kvp.Key].AddRange(kvp.Value);
-                    }
-                    else
-                    {
-                        result[kvp.Key] = new List<IMessage>(kvp.Value);
-                    }
-                }
+                result.AddRange(conditionCaptures);
             }
             
             return result;
         }
 
         public override string ToString()
+        {
+            return FormatAsString();
+        }
+
+        /// <summary>
+        /// Template method for formatting pattern as string. Can be overridden for custom formatting.
+        /// </summary>
+        protected virtual string FormatAsString()
         {
             // If this is a base Find with a nodeType, show the nodeType
             if (!string.IsNullOrEmpty(_nodeType))
@@ -338,7 +452,6 @@ namespace PgQuery.NET.AST.Pattern
         }
     }
 
-
     /// <summary>
     /// Matches any node (wildcard pattern "_").
     /// </summary>
@@ -351,11 +464,13 @@ namespace PgQuery.NET.AST.Pattern
             if (condition != null)
                 throw new ArgumentException("Something cannot have a condition");
         }
+        
         public override bool MatchCondition(IMessage node)
         {
             return node != null;
         }
-        public override string ToString()
+        
+        protected override string FormatAsString()
         {
             return "_";
         }
@@ -384,14 +499,8 @@ namespace PgQuery.NET.AST.Pattern
                 {
                     return astNode.GetSmartChildren().Any();
                 }
-                var descriptor = node.Descriptor;
-                foreach (var field in descriptor.Fields.InDeclarationOrder())
-                {
-                    var value = field.Accessor.GetValue(node);
-                    if (value != null)
-                        return true;
-                }
-                return false;
+                // Use the iterator utility to check for children
+                return ProtobufNodeIterator.AnyChild(node, _ => true);
             }
             
             // Search through children to find matches for any condition (OR logic for ellipsis)
@@ -404,76 +513,22 @@ namespace PgQuery.NET.AST.Pattern
             // which searches through children. Don't call MatchConditions.
             return MatchCondition(node);
         }
-        public override string ToString()
+
+        protected override string FormatAsString()
         {
             return "HasChildren(" + string.Join(", ", Conditions.Select(c => c.ToString())) + ")";
         }
     }
 
     /// <summary>
-    /// Captures field values from nodes that have a specific field.
-    /// </summary>
-    public class FieldCapture : Find
-    {
-        private readonly string _captureName;
-        private readonly string _fieldName;
-
-        public FieldCapture(string captureName, string fieldName)
-        {
-            _captureName = captureName ?? throw new ArgumentNullException(nameof(captureName));
-            _fieldName = fieldName ?? throw new ArgumentNullException(nameof(fieldName));
-        }
-
-        public override bool Match(IMessage node)
-        {
-            if (HasField(node, _fieldName))
-            {
-                if (!Captures.ContainsKey(_captureName))
-                    Captures[_captureName] = new List<IMessage>();
-                
-                // Capture the field value directly
-                var fieldValue = GetFieldValue(node, _fieldName);
-                
-                if (fieldValue != null)
-                {
-                    if (fieldValue is IMessage fieldMessage)
-                    {
-                        Captures[_captureName].Add(fieldMessage);
-                    }
-                    else
-                    {
-                        // For non-IMessage values (like strings), wrap them
-                        Captures[_captureName].Add(new FieldValueWrapper(fieldValue));
-                    }
-                }
-                return true;
-            }
-            return false;
-        }
-
-        public override bool MatchCondition(IMessage node)
-        {
-            return HasField(node, _fieldName);
-        }
-
-        public override string ToString()
-        {
-            var count = Captures.ContainsKey(_captureName) ? Captures[_captureName].Count : 0;
-            return $"FieldCapture({_captureName}, {_fieldName}, {count})";
-        }
-    }
-
-    /// <summary>
-    /// Captures matching nodes with a given name.
+    /// Captures matching nodes.
     /// </summary>
     public class Capture : Find
     {
-        public readonly string _name;
         private readonly Find _innerExpression;
 
-        public Capture(string name, Find innerExpression)
+        public Capture(Find innerExpression)
         {
-            _name = name ?? throw new ArgumentNullException(nameof(name));
             _innerExpression = innerExpression ?? throw new ArgumentNullException(nameof(innerExpression));
         }
 
@@ -481,32 +536,22 @@ namespace PgQuery.NET.AST.Pattern
         {
             if (_innerExpression.Match(node))
             {
-                if (!Captures.ContainsKey(_name))
-                    Captures[_name] = new List<IMessage>();
-                
                 // Capture the actual match result, following Ruby Fast approach
                 var capturedValue = GetCaptureValue(node);
-                Captures[_name].Add(capturedValue);
+                Captures.Add(capturedValue);
                 return true;
             }
             return false;
         }
 
-        private IMessage GetCaptureValue(IMessage node)
+        private object GetCaptureValue(IMessage node)
         {
             // Recursively search for field patterns that match this node
             var fieldValue = FindMatchingFieldValue(_innerExpression, node);
             if (fieldValue != null && fieldValue != node)
             {
-                // Found a field value, wrap it if needed
-                if (fieldValue is IMessage fieldMessage)
-                {
-                    return fieldMessage;
-                }
-                else
-                {
-                    return new FieldValueWrapper(fieldValue);
-                }
+                // Found a field value, return it directly
+                return fieldValue;
             }
             
             // Default: capture the node itself
@@ -543,10 +588,10 @@ namespace PgQuery.NET.AST.Pattern
             return _innerExpression.MatchCondition(node);
         }
 
-        public override string ToString()
+        protected override string FormatAsString()
         {
-            var count = Captures.ContainsKey(_name) ? Captures[_name].Count : 0;
-            return $"Capture({_name}, {_innerExpression.ToString()}, {count})";
+            var count = Captures.Count;
+            return $"Capture({_innerExpression.ToString()}, {count})";
         }
     }
 
@@ -569,9 +614,9 @@ namespace PgQuery.NET.AST.Pattern
             return true;
         }
 
-        public override string ToString()
+        protected override string FormatAsString()
         {
-            return "Parent(" + base.ToString() + ")";
+            return "Parent(" + base.FormatAsString() + ")";
         }
     }
 
@@ -600,27 +645,19 @@ namespace PgQuery.NET.AST.Pattern
         protected override bool MatchConditions(IMessage node)
         {
             // OR logic: any condition can match (this is the key difference from base Find)
-            bool anyMatched = false;
-            foreach (var condition in Conditions)
+            var matchingConditions = Conditions.Where(condition => condition.Match(node)).ToList();
+            
+            if (matchingConditions.Any())
             {
-                if (condition.Match(node))
-                {
-                    anyMatched = true;
-                    
-                    // Propagate captures from matching conditions
-                    var conditionCaptures = condition.GetCaptures();
-                    foreach (var kvp in conditionCaptures)
-                    {
-                        if (!Captures.ContainsKey(kvp.Key))
-                            Captures[kvp.Key] = new List<IMessage>();
-                        Captures[kvp.Key].AddRange(kvp.Value);
-                    }
-                }
+                // Propagate captures from all matching conditions
+                PropagateCaptures(matchingConditions);
+                return true;
             }
-            return anyMatched;
+            
+            return false;
         }
 
-        public override string ToString()
+        protected override string FormatAsString()
         {
             if (Conditions.Count > 0)
             {
@@ -652,29 +689,31 @@ namespace PgQuery.NET.AST.Pattern
             // AND logic: all conditions must match
             if (Conditions.Count == 0) return true;
             
-            bool allMatched = true;
+            var matchingConditions = new List<Find>();
+            var allMatched = true;
+            
             foreach (var condition in Conditions)
             {
                 if (condition.Match(node))
                 {
-                    // Propagate captures from matching conditions
-                    var conditionCaptures = condition.GetCaptures();
-                    foreach (var kvp in conditionCaptures)
-                    {
-                        if (!Captures.ContainsKey(kvp.Key))
-                            Captures[kvp.Key] = new List<IMessage>();
-                        Captures[kvp.Key].AddRange(kvp.Value);
-                    }
+                    matchingConditions.Add(condition);
                 }
                 else
                 {
                     allMatched = false;
                 }
             }
+            
+            // Only propagate captures if all conditions matched
+            if (allMatched)
+            {
+                PropagateCaptures(matchingConditions);
+            }
+            
             return allMatched;
         }
 
-        public override string ToString()
+        protected override string FormatAsString()
         {
             return "All";
         }
@@ -697,9 +736,9 @@ namespace PgQuery.NET.AST.Pattern
             return !base.MatchCondition(node);
         }
 
-        public override string ToString()
+        protected override string FormatAsString()
         {
-            return "Not(" + base.ToString() + ")";
+            return "Not(" + base.FormatAsString() + ")";
         }
     }
 
@@ -722,9 +761,9 @@ namespace PgQuery.NET.AST.Pattern
             return node != null && base.MatchCondition(node);
         }
 
-        public override string ToString()
+        protected override string FormatAsString()
         {
-            return "Maybe(" + base.ToString() + ")";
+            return "Maybe(" + base.FormatAsString() + ")";
         }
     }
     class Literal : Find
@@ -742,7 +781,7 @@ namespace PgQuery.NET.AST.Pattern
             }
             return false;
         }
-        public override string ToString()
+        protected override string FormatAsString()
         {
             return $"\"{_value}\"";
         }
@@ -764,22 +803,16 @@ namespace PgQuery.NET.AST.Pattern
             if (node == null) return false;
             
             // Check if the node has this field
-            if (!HasField(node, _fieldName)) return false;
+            if (!FieldAccessor.HasField(node, _fieldName)) return false;
             
             // Get field value and check if inner expression matches
-            var fieldValue = GetFieldValue(node, _fieldName);
+            var fieldValue = FieldAccessor.GetFieldValue(node, _fieldName);
             if (fieldValue == null) return false;
             
             // For string values, create a wrapper to match against
-            IMessage valueToMatch;
-            if (fieldValue is IMessage fieldMessage)
-            {
-                valueToMatch = fieldMessage;
-            }
-            else
-            {
-                valueToMatch = new FieldValueWrapper(fieldValue);
-            }
+            IMessage valueToMatch = fieldValue is IMessage fieldMessage 
+                ? fieldMessage 
+                : new FieldValueWrapper(fieldValue);
             
             // Clear inner expression captures to avoid accumulation
             _innerExpression.Captures.Clear();
@@ -787,13 +820,10 @@ namespace PgQuery.NET.AST.Pattern
             // Call match and propagate captures
             bool matches = _innerExpression.Match(valueToMatch);
             
-            // Propagate only the NEW captures from this match
-            var innerCaptures = _innerExpression.GetCaptures();
-            foreach (var kvp in innerCaptures)
+            // Propagate captures using the utility method
+            if (matches)
             {
-                if (!Captures.ContainsKey(kvp.Key))
-                    Captures[kvp.Key] = new List<IMessage>();
-                Captures[kvp.Key].AddRange(kvp.Value);
+                PropagateCaptures(new[] { _innerExpression });
             }
             
             return matches;
@@ -802,7 +832,7 @@ namespace PgQuery.NET.AST.Pattern
         public override object GetMatchResult(IMessage node)
         {
             // For MatchAttribute, return the field value itself for captures
-            var fieldValue = GetFieldValue(node, _fieldName);
+            var fieldValue = FieldAccessor.GetFieldValue(node, _fieldName);
             if (fieldValue != null)
             {
                 return fieldValue;
@@ -810,7 +840,7 @@ namespace PgQuery.NET.AST.Pattern
             return node;
         }
         
-        public override string ToString()
+        protected override string FormatAsString()
         {
             return $"MatchAttribute({_fieldName}, {_innerExpression.ToString()})";
         }
