@@ -1,18 +1,18 @@
 using System;
-using PgQuery.NET;
+using GrepSQL;
 
 class Program
 {
     static void Main(string[] args)
     {
-        Console.WriteLine("Starting minimal PgQuery.NET example...");
+        Console.WriteLine("Starting minimal GrepSQL example...");
         
         try
         {
             var query = "SELECT 1";
             Console.WriteLine($"Attempting to parse query: {query}");
             
-            var result = PgQuery.NET.PgQuery.Parse(query);
+            var result = GrepSQL.PgQuery.Parse(query);
             Console.WriteLine("Successfully parsed query!");
             Console.WriteLine($"Number of statements: {result.ParseTree.Stmts.Count}");
             

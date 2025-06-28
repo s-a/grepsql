@@ -1,4 +1,4 @@
-﻿using PgQuery.NET;
+﻿using GrepSQL;
 
 class Program
 {
@@ -10,7 +10,7 @@ class Program
         try
         {
             // Generate fingerprint
-            var fingerprintResult = PgQuery.NET.PgQuery.Fingerprint(query);
+            var fingerprintResult = GrepSQL.PgQuery.Fingerprint(query);
             Console.WriteLine($"Query: {query}");
             Console.WriteLine($"Fingerprint: {fingerprintResult.Fingerprint}");
         }

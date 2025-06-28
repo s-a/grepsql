@@ -1,19 +1,19 @@
 using System;
 using System.Text.Json;
-using PgQuery.NET;
-using PgQuery.NET.Analysis;
+using GrepSQL;
+using GrepSQL.Analysis;
 
 class Program
 {
     static void Main(string[] args)
     {
-        Console.WriteLine("PgQuery.NET API Examples");
+        Console.WriteLine("GrepSQL API Examples");
         Console.WriteLine("=======================\n");
 
         if (args.Length > 0 && args[0] == "--debug-ast")
         {
             var query = args[1];
-            var result = PgQuery.NET.PgQuery.Parse(query);
+            var result = GrepSQL.PgQuery.Parse(query);
             Console.WriteLine($"AST for query: {query}");
             Console.WriteLine(JsonSerializer.Serialize(result.ParseTree, new JsonSerializerOptions { WriteIndented = true }));
             return;
@@ -50,7 +50,7 @@ class Program
         Console.WriteLine("---------------------");
 
         var query = "SELECT id, name FROM users WHERE age > 25";
-        var result = PgQuery.NET.PgQuery.Parse(query);
+        var result = GrepSQL.PgQuery.Parse(query);
         
         Console.WriteLine($"Query: {query}");
         Console.WriteLine($"AST (first node type): {result.ParseTree.RootElement.EnumerateObject().First().Name}");
@@ -71,7 +71,7 @@ class Program
 
         foreach (var query in queries)
         {
-            var result = PgQuery.NET.PgQuery.Normalize(query);
+            var result = GrepSQL.PgQuery.Normalize(query);
             Console.WriteLine($"Original:   {query}");
             Console.WriteLine($"Normalized: {result.NormalizedQuery}");
             Console.WriteLine();
@@ -87,8 +87,8 @@ class Program
         var query1 = "SELECT * FROM users WHERE age > 25";
         var query2 = "SELECT * FROM users WHERE age > 30";
 
-        var fp1 = PgQuery.NET.PgQuery.Fingerprint(query1);
-        var fp2 = PgQuery.NET.PgQuery.Fingerprint(query2);
+        var fp1 = GrepSQL.PgQuery.Fingerprint(query1);
+        var fp2 = GrepSQL.PgQuery.Fingerprint(query2);
 
         Console.WriteLine("Comparing structurally similar queries:");
         Console.WriteLine($"Query 1: {query1}");
@@ -98,7 +98,7 @@ class Program
 
         // Example 2: Different structure
         var query3 = "SELECT name FROM users";
-        var fp3 = PgQuery.NET.PgQuery.Fingerprint(query3);
+        var fp3 = GrepSQL.PgQuery.Fingerprint(query3);
 
         Console.WriteLine("Comparing structurally different queries:");
         Console.WriteLine($"Query 1: {query1}");
@@ -123,7 +123,7 @@ class Program
         {
             try
             {
-                var result = PgQuery.NET.PgQuery.Parse(query);
+                var result = GrepSQL.PgQuery.Parse(query);
                 Console.WriteLine($"Unexpected success parsing: {query}");
             }
             catch (PgQueryException ex)
@@ -150,7 +150,7 @@ class Program
 
         foreach (var query in queries)
         {
-            var result = PgQuery.NET.PgQuery.Parse(query);
+            var result = GrepSQL.PgQuery.Parse(query);
             var tables = result.GetTableNames();
 
             Console.WriteLine($"Query: {query}");
@@ -174,7 +174,7 @@ class Program
 
         foreach (var query in queries)
         {
-            var result = PgQuery.NET.PgQuery.Parse(query);
+            var result = GrepSQL.PgQuery.Parse(query);
             Console.WriteLine($"Query: {query}");
             Console.WriteLine($"Is SELECT: {result.IsSelectQuery()}");
             Console.WriteLine();

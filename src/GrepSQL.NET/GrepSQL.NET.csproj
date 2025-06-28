@@ -1,0 +1,121 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net9.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PackageId>GrepSQL.NET</PackageId>
+    <PackageVersion>0.0.1</PackageVersion>
+    <Title>GrepSQL.NET</Title>
+    <Authors>Jônatas Davi Paganini</Authors>
+    <Description>
+      A .NET wrapper for libpg_query - parse, normalize, and fingerprint PostgreSQL queries using the actual PostgreSQL parser.
+      You can also use it to analyze queries and find patterns using a simple DSL inspired by grep.
+      It's a wrapper for the [libpg_query](https://github.com/pganalyze/libpg_query) library, which is a C library that provides a parser for PostgreSQL.
+      Uses protobuf to serialize and deserialize the AST.
+    </Description>
+    <PackageTags>postgresql;sql;parser;search;grep;cli;libpg_query;pgquery;ast;query;analysis;pattern;matching;find;replace;rewrite</PackageTags>
+    <RepositoryUrl>https://github.com/jonatas/pgquery-dotnet</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <DefineConstants>__MACOS__</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <DefineConstants>__LINUX__</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <DefineConstants>__WINDOWS__</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Define native library names for different platforms -->
+    <PgQueryWrapperWin>pgquery_wrapper.dll</PgQueryWrapperWin>
+    <PgQueryWrapperLinux>libpgquery_wrapper.so</PgQueryWrapperLinux>
+    <PgQueryWrapperMac>libpgquery_wrapper.dylib</PgQueryWrapperMac>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.31.1" />
+    <PackageReference Include="Google.Protobuf.Tools" Version="3.31.1" />
+    <PackageReference Include="Grpc.Tools" Version="2.72.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Native libraries for Windows -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <Content Include="runtimes\win-x64\native\$(PgQueryWrapperWin)" Condition="Exists('runtimes\win-x64\native\$(PgQueryWrapperWin)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackagePath>runtimes\win-x64\native\$(PgQueryWrapperWin)</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    <Content Include="runtimes\win-x86\native\$(PgQueryWrapperWin)" Condition="Exists('runtimes\win-x86\native\$(PgQueryWrapperWin)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackagePath>runtimes\win-x86\native\$(PgQueryWrapperWin)</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    <Content Include="runtimes\win-arm64\native\$(PgQueryWrapperWin)" Condition="Exists('runtimes\win-arm64\native\$(PgQueryWrapperWin)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackagePath>runtimes\win-arm64\native\$(PgQueryWrapperWin)</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    
+    <!-- Fallback: Copy wrapper library directly to output directory for better compatibility -->
+    <Content Include="runtimes\win-x64\native\$(PgQueryWrapperWin)" Condition="Exists('runtimes\win-x64\native\$(PgQueryWrapperWin)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>$(PgQueryWrapperWin)</Link>
+    </Content>
+  </ItemGroup>
+
+  <!-- Native libraries for Linux -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <Content Include="runtimes\linux-x64\native\$(PgQueryWrapperLinux)" Condition="Exists('runtimes\linux-x64\native\$(PgQueryWrapperLinux)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackagePath>runtimes\linux-x64\native\$(PgQueryWrapperLinux)</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    <Content Include="runtimes\linux-arm64\native\$(PgQueryWrapperLinux)" Condition="Exists('runtimes\linux-arm64\native\$(PgQueryWrapperLinux)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackagePath>runtimes\linux-arm64\native\$(PgQueryWrapperLinux)</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    
+    <!-- Fallback: Copy wrapper library directly to output directory for better compatibility -->
+    <Content Include="runtimes\linux-x64\native\$(PgQueryWrapperLinux)" Condition="Exists('runtimes\linux-x64\native\$(PgQueryWrapperLinux)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>$(PgQueryWrapperLinux)</Link>
+    </Content>
+  </ItemGroup>
+
+  <!-- Native libraries for macOS -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <Content Include="runtimes\osx-x64\native\$(PgQueryWrapperMac)" Condition="Exists('runtimes\osx-x64\native\$(PgQueryWrapperMac)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackagePath>runtimes\osx-x64\native\$(PgQueryWrapperMac)</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    <Content Include="runtimes\osx-arm64\native\$(PgQueryWrapperMac)" Condition="Exists('runtimes\osx-arm64\native\$(PgQueryWrapperMac)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackagePath>runtimes\osx-arm64\native\$(PgQueryWrapperMac)</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    
+    <!-- Fallback: Copy wrapper library directly to output directory for better compatibility -->
+    <Content Include="runtimes\osx-arm64\native\$(PgQueryWrapperMac)" Condition="Exists('runtimes\osx-arm64\native\$(PgQueryWrapperMac)')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>$(PgQueryWrapperMac)</Link>
+    </Content>
+  </ItemGroup>
+</Project>
+

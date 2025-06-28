@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\..\PgQuery.NET\PgQuery.NET.csproj" />
+    <ProjectReference Include="..\..\GrepSQL.NET\GrepSQL.NET.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -7,9 +7,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CommandLine;
 using Google.Protobuf;
-using PgQuery.NET;
-using PgQuery.NET.SQL;
-using PgQuery.NET.AST;
+using GrepSQL;
+using GrepSQL.SQL;
+using GrepSQL.AST;
 
 namespace GrepSQL
 {
