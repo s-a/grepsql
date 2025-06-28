@@ -180,6 +180,32 @@ namespace GrepSQL.SQL
             return PatternMatch.GetExpressionTree(pattern);
         }
 
+        // ==================== AST-BASED METHODS ====================
+
+        /// <summary>
+        /// Checks if a pattern matches in the given AST
+        /// </summary>
+        public static bool Match(string pattern, ParseResult parseResult, bool debug = false)
+        {
+            return PatternMatch.Search(parseResult.ParseTree, pattern, debug).Any();
+        }
+
+        /// <summary>
+        /// Searches for all matches of a pattern in the given AST
+        /// </summary>
+        public static List<IMessage> SearchInAst(string pattern, ParseResult parseResult, bool debug = false)
+        {
+            return PatternMatch.Search(parseResult.ParseTree, pattern, debug);
+        }
+
+        /// <summary>
+        /// Searches for all matches with captures in the given AST
+        /// </summary>
+        public static List<object> SearchWithCapturesInAst(string pattern, ParseResult parseResult, bool debug = false)
+        {
+            return PatternMatch.SearchWithCaptures(parseResult.ParseTree, pattern, debug);
+        }
+
         // ==================== UTILITY METHODS ====================
 
         /// <summary>
