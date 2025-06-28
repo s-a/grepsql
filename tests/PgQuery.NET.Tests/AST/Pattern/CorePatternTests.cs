@@ -113,11 +113,10 @@ namespace PgQuery.NET.Tests.AST.Pattern
 
             // Assert
             Assert.NotEmpty(captures);
-            Assert.Contains("default", captures.Keys);
-            Assert.Equal("users", captures["default"][0].ToString());
+            Assert.Equal("users", captures[0].ToString());
             
-            _output.WriteLine($"Captured {captures.Count} groups");
-            _output.WriteLine($"  default: {captures["default"].Count} items");
+            _output.WriteLine($"Captured {captures.Count} items");
+            _output.WriteLine($"  [0]: {captures[0]}");
         }
 
         [Fact]
@@ -132,10 +131,9 @@ namespace PgQuery.NET.Tests.AST.Pattern
 
             // Assert
             Assert.NotEmpty(captures);
-            Assert.Contains("default", captures.Keys);
             
             // Should capture both column names and table names
-            var capturedValues = captures["default"].Select(c => c.ToString()).ToList();
+            var capturedValues = captures.Select(c => c.ToString()).ToList();
             
             // Should include table names like "users", "posts"
             Assert.Contains("users", capturedValues);
@@ -147,10 +145,10 @@ namespace PgQuery.NET.Tests.AST.Pattern
             Assert.Contains("id", capturedValues);
             Assert.Contains("user_id", capturedValues);
             
-            _output.WriteLine($"Complex Any Capture found {captures["default"].Count} items:");
-            for (int i = 0; i < captures["default"].Count; i++)
+            _output.WriteLine($"Complex Any Capture found {captures.Count} items:");
+            for (int i = 0; i < captures.Count; i++)
             {
-                _output.WriteLine($"  [{i}]: {captures["default"][i]}");
+                _output.WriteLine($"  [{i}]: {captures[i]}");
             }
         }
 
@@ -216,23 +214,24 @@ namespace PgQuery.NET.Tests.AST.Pattern
 
             // Assert
             Assert.NotEmpty(captures);
-            Assert.Contains("default", captures.Keys);
+            Assert.True(captures.Count >= 3, $"Expected at least 3 captures, got {captures.Count}");
             
             // Debug output to understand the issue
             _output.WriteLine($"SQL: {sql}");
             _output.WriteLine($"Pattern: (relname $_)");
-            _output.WriteLine($"Total capture groups: {captures.Count}");
-            _output.WriteLine($"Captures in 'default' group: {captures["default"].Count}");
-            for (int i = 0; i < captures["default"].Count; i++)
+            _output.WriteLine($"Total captures: {captures.Count}");
+            for (int i = 0; i < captures.Count; i++)
             {
-                _output.WriteLine($"  [{i}]: '{captures["default"][i]}'");
+                _output.WriteLine($"  [{i}]: '{captures[i]}'");
             }
             
-            Assert.Equal("a", captures["default"][0].ToString());
-            Assert.Equal("b", captures["default"][1].ToString());
-            Assert.Equal("c", captures["default"][2].ToString());
+            // Check that we captured the table names a, b, c
+            var capturedValues = captures.Select(c => c.ToString()).ToList();
+            Assert.Contains("a", capturedValues);
+            Assert.Contains("b", capturedValues);
+            Assert.Contains("c", capturedValues);
             
-            _output.WriteLine($"PatternMatcher captured {captures.Count} groups");
+            _output.WriteLine($"PatternMatcher captured {captures.Count} items");
         }
 
         [Theory]

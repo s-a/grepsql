@@ -103,8 +103,8 @@ namespace PgQuery.NET.AST.Pattern
         /// <param name="rootNode">Root node to search in</param>
         /// <param name="pattern">Pattern with capture groups</param>
         /// <param name="debug">Enable debug output</param>
-        /// <returns>Dictionary of captured nodes by name</returns>
-        public static Dictionary<string, List<IMessage>> SearchWithCaptures(IMessage rootNode, string pattern, bool debug = false)
+        /// <returns>List of captured objects</returns>
+        public static List<object> SearchWithCaptures(IMessage rootNode, string pattern, bool debug = false)
         {
             if (rootNode == null) throw new ArgumentNullException(nameof(rootNode));
             if (string.IsNullOrEmpty(pattern)) throw new ArgumentException("Pattern cannot be null or empty", nameof(pattern));
@@ -187,7 +187,7 @@ namespace PgQuery.NET.AST.Pattern
                 case "?":
                     return new Maybe(ParseExpression(tokens));
                 case "$":
-                    return new Capture("default", ParseExpression(tokens));
+                    return new Capture(ParseExpression(tokens));
                 case "_":
                     return new Something();
                 case "...":

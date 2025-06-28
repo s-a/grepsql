@@ -190,7 +190,7 @@ namespace GrepSQL
         public string MatchDetails { get; set; } = "";
         public HashSet<IMessage>? MatchingPath { get; set; }
         public List<IMessage>? MatchingNodes { get; set; }
-        public IReadOnlyDictionary<string, List<IMessage>>? Captures { get; set; }
+        public List<object>? Captures { get; set; }
     }
 
     // Simple SqlHighlighter implementation
@@ -441,7 +441,10 @@ namespace GrepSQL
                         Console.Error.WriteLine($"[DEBUG] Results: {results.Count}");
                     }
 
-                    if (results.Count > 0)
+                    // Get captures using the new capture system
+                    var captures = PatternMatcher.SearchWithCaptures(pattern, sql, debug);
+                    
+                    if (results.Count > 0 || captures.Any())
                     {
                         // Create a single match for this SQL statement with all matching nodes
                         var match = new SqlMatch
@@ -452,20 +455,19 @@ namespace GrepSQL
                             Ast = parseResult.ParseTree, // Store the full parse tree
                             MatchedNode = results.FirstOrDefault(), // Store the first matched node
                             MatchingNodes = results.ToList(), // Store all matching nodes
-                            MatchingPath = new HashSet<IMessage>(results) // Store matching path for highlighting
+                            MatchingPath = new HashSet<IMessage>(results), // Store matching path for highlighting
+                            Captures = captures.Any() ? captures : null // Store captures
                         };
 
                         matches.Add(match);
                     }
 
-                    // Get captures (though this returns empty dictionary currently)
-                    var captures = PatternMatcher.GetCaptures();
                     if (captures.Any() && debug)
                     {
                         Console.Error.WriteLine($"[DEBUG] Captures: {captures.Count}");
-                        foreach (var capture in captures)
+                        for (int j = 0; j < captures.Count; j++)
                         {
-                            Console.Error.WriteLine($"[DEBUG] Capture {capture.Key}: {capture.Value}");
+                            Console.Error.WriteLine($"[DEBUG] Capture [{j}]: {captures[j]}");
                         }
                     }
                 }
@@ -701,58 +703,53 @@ namespace GrepSQL
             {
                 if (match.Captures != null && match.Captures.Count > 0)
                 {
-                    // Check if we only have the default capture group
-                    bool onlyDefaultCaptures = match.Captures.Count == 1 && match.Captures.ContainsKey("default");
-                    
-                    foreach (var captureGroup in match.Captures)
+                    for (int i = 0; i < match.Captures.Count; i++)
                     {
-                        var captureName = captureGroup.Key;
-                        var capturedNodes = captureGroup.Value;
+                        var capturedValue = match.Captures[i];
                         
-                        foreach (var capturedNode in capturedNodes)
+                        // If --tree is specified with --captures-only, show tree structure of captured nodes
+                        if (options.PrintTree && capturedValue is IMessage capturedNode)
                         {
-                            // If --tree is specified with --captures-only, show tree structure of captured nodes
-                            if (options.PrintTree)
+                            Console.WriteLine($"{prefix}[CAPTURED NODE {i}]");
+                            
+                            var useColors = !options.NoColor && TreePrinter.SupportsColors();
+                            var treeMode = ParseTreeMode(options.TreeMode);
+                            TreePrinter.PrintTree(capturedNode, useColors, maxDepth: 8, TreePrinter.NodeStatus.Matched, treeMode);
+                        }
+                        else
+                        {
+                            // Default behavior: extract simple values or show object string representation
+                            string? displayValue = null;
+                            
+                            if (capturedValue is IMessage node)
                             {
-                                var captureHeader = onlyDefaultCaptures ? 
-                                    $"{prefix}[CAPTURED NODE]" : 
-                                    $"{prefix}[{captureName}]";
-                                    
-                                Console.WriteLine(captureHeader);
-                                
-                                var useColors = !options.NoColor && TreePrinter.SupportsColors();
-                                var treeMode = ParseTreeMode(options.TreeMode);
-                                TreePrinter.PrintTree(capturedNode, useColors, maxDepth: 8, TreePrinter.NodeStatus.Matched, treeMode);
+                                // Only call ExtractNodeValue if the node has a proper descriptor
+                                try
+                                {
+                                    displayValue = ExtractNodeValue(node);
+                                    if (string.IsNullOrEmpty(displayValue))
+                                    {
+                                        displayValue = node.Descriptor?.Name ?? "Unknown";
+                                    }
+                                }
+                                catch (NotSupportedException)
+                                {
+                                    // Handle FieldValueWrapper and similar cases
+                                    displayValue = node.ToString();
+                                }
                             }
                             else
                             {
-                                // Default behavior: extract simple values or show node type
-                                var captureValue = ExtractNodeValue(capturedNode);
-                                if (!string.IsNullOrEmpty(captureValue))
-                                {
-                                    if (onlyDefaultCaptures)
-                                    {
-                                        // Don't show [default]: prefix when there's only default captures
-                                        Console.WriteLine($"{prefix}{captureValue}");
-                                    }
-                                    else
-                                    {
-                                        // Show capture group name when there are multiple named captures
-                                        Console.WriteLine($"{prefix}[{captureName}]: {captureValue}");
-                                    }
-                                }
-                                else
-                                {
-                                    // If we can't extract a simple value, show the node type
-                                    if (onlyDefaultCaptures)
-                                    {
-                                        Console.WriteLine($"{prefix}{capturedNode.Descriptor?.Name ?? "Unknown"}");
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine($"{prefix}[{captureName}]: {capturedNode.Descriptor?.Name ?? "Unknown"}");
-                                    }
-                                }
+                                displayValue = capturedValue?.ToString();
+                            }
+                            
+                            if (!string.IsNullOrEmpty(displayValue))
+                            {
+                                Console.WriteLine($"{prefix}{displayValue}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"{prefix}[EMPTY CAPTURE {i}]");
                             }
                         }
                     }
@@ -894,10 +891,14 @@ namespace GrepSQL
         /// </summary>
         static string? ExtractNodeValue(IMessage node)
         {
-            if (node?.Descriptor == null) return null;
-
-            // Handle common node types that contain useful values
-            var nodeTypeName = node.Descriptor.Name;
+            if (node == null) return null;
+            
+            try
+            {
+                if (node.Descriptor == null) return null;
+                
+                // Handle common node types that contain useful values
+                var nodeTypeName = node.Descriptor.Name;
 
             switch (nodeTypeName)
             {
@@ -931,6 +932,17 @@ namespace GrepSQL
                             return value;
                     }
                     return null;
+            }
+            }
+            catch (NotSupportedException)
+            {
+                // Handle cases like FieldValueWrapper that don't have a proper descriptor
+                return node.ToString();
+            }
+            catch (Exception)
+            {
+                // Handle any other exceptions gracefully
+                return node.ToString();
             }
         }
 

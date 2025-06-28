@@ -13,7 +13,7 @@ namespace PgQuery.NET.SQL
     public static class PatternMatcher
     {
         private static bool _debugEnabled = false;
-        private static Dictionary<string, List<IMessage>> _globalCaptures = new();
+        // Legacy field - no longer used as captures are handled per-operation
 
         /// <summary>
         /// Enable or disable debug output.
@@ -51,33 +51,28 @@ namespace PgQuery.NET.SQL
         }
 
         /// <summary>
-        /// Search for nodes and capture named groups.
+        /// Search for nodes and capture groups.
         /// </summary>
         /// <param name="pattern">Pattern with capture groups</param>
         /// <param name="sql">SQL string to search in</param>
         /// <param name="debug">Enable debug output</param>
-        /// <returns>Dictionary of captured nodes by name</returns>
-        public static Dictionary<string, List<IMessage>> SearchWithCaptures(string pattern, string sql, bool debug = false)
+        /// <returns>List of captured objects</returns>
+        public static List<object> SearchWithCaptures(string pattern, string sql, bool debug = false)
         {
             // For captures, we need to use the PatternMatch.SearchWithCaptures method
             // but we need to iterate through statements like SearchInSql does
             var parseResult = Postgres.ParseSql(sql);
             if (parseResult?.ParseTree?.Stmts == null)
-                return new Dictionary<string, List<IMessage>>();
+                return new List<object>();
 
-            var allCaptures = new Dictionary<string, List<IMessage>>();
+            var allCaptures = new List<object>();
             
             foreach (var stmt in parseResult.ParseTree.Stmts)
             {
                 if (stmt?.Stmt != null)
                 {
                     var stmtCaptures = PatternMatch.SearchWithCaptures(stmt.Stmt, pattern, debug);
-                    foreach (var capture in stmtCaptures)
-                    {
-                        if (!allCaptures.ContainsKey(capture.Key))
-                            allCaptures[capture.Key] = new List<IMessage>();
-                        allCaptures[capture.Key].AddRange(capture.Value);
-                    }
+                    allCaptures.AddRange(stmtCaptures);
                 }
             }
             
@@ -170,8 +165,8 @@ namespace PgQuery.NET.SQL
         /// <param name="node">Root AST node to search within</param>
         /// <param name="pattern">Pattern with capture groups</param>
         /// <param name="debug">Enable debug output</param>
-        /// <returns>Dictionary of captured nodes by name</returns>
-        public static Dictionary<string, List<IMessage>> SearchWithCaptures(IMessage node, string pattern, bool debug = false)
+        /// <returns>List of captured objects</returns>
+        public static List<object> SearchWithCaptures(IMessage node, string pattern, bool debug = false)
         {
             return PatternMatch.SearchWithCaptures(node, pattern, debug);
         }
@@ -286,7 +281,7 @@ namespace PgQuery.NET.SQL
         /// <summary>
         /// Get captured nodes (legacy support).
         /// </summary>
-        /// <returns>Empty dictionary (captures are now handled differently)</returns>
+        /// <returns>Empty dictionary (captures are now handled per-operation)</returns>
         public static IReadOnlyDictionary<string, List<IMessage>> GetCaptures()
         {
             return new Dictionary<string, List<IMessage>>();
@@ -380,7 +375,7 @@ namespace PgQuery.NET.SQL
         public string Sql { get; set; } = "";
         public int MatchCount { get; set; }
         public List<IMessage> Matches { get; set; } = new();
-        public Dictionary<string, List<IMessage>> Captures { get; set; } = new();
+        public List<object> Captures { get; set; } = new();
         public IMessage? ParseTree { get; set; }
     }
 } 
