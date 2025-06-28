@@ -160,21 +160,21 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           # Test the published binary
-          ./publish/${{ matrix.platform }}/GrepSQL${{ matrix.extension }} --help || echo "Binary needs runtime libraries"
-          echo "SELECT * FROM users;" | ./publish/${{ matrix.platform }}/GrepSQL${{ matrix.extension }} "SelectStmt" || echo "Test completed"
+          ./publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }} --help || echo "Binary needs runtime libraries"
+          echo "SELECT * FROM users;" | ./publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }} "SelectStmt" || echo "Test completed"
 
       - name: Create archive (Unix)
         if: matrix.archive_ext == 'tar.gz'
         run: |
           cd publish/${{ matrix.platform }}
-          tar -czf ../../grepsql-${{ matrix.platform }}.tar.gz GrepSQL${{ matrix.extension }}
+          tar -czf ../../grepsql-${{ matrix.platform }}.tar.gz GrepSQL.CLI${{ matrix.extension }}
           cd ../..
 
       - name: Create archive (Windows)
         if: matrix.archive_ext == 'zip'
         run: |
           cd publish/${{ matrix.platform }}
-          Compress-Archive -Path "GrepSQL${{ matrix.extension }}" -DestinationPath "../../grepsql-${{ matrix.platform }}.zip"
+          Compress-Archive -Path "GrepSQL.CLI${{ matrix.extension }}" -DestinationPath "../../grepsql-${{ matrix.platform }}.zip"
           cd ../..
 
       - name: Upload binary artifacts
@@ -183,7 +183,7 @@ jobs:
           name: grepsql-${{ matrix.platform }}
           path: |
             grepsql-${{ matrix.platform }}.*
-            publish/${{ matrix.platform }}/GrepSQL${{ matrix.extension }}
+            publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }}
           retention-days: 30
 
   create-release:
