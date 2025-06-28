@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🏗️  Building PgQuery.NET with libpg_query..."
+echo "🏗️  Building GrepSQL with libpg_query..."
 
 # Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -104,21 +104,26 @@ if [ -f "libpgquery_wrapper.$LIBRARY_EXT" ]; then
 fi
 
 # Also copy to project runtimes directory
-mkdir -p "src/PgQuery.NET/runtimes/$TARGET_RID/native"
+mkdir -p "src/GrepSQL/runtimes/$TARGET_RID/native"
 if [ -f "libpgquery_wrapper.$LIBRARY_EXT" ]; then
-    cp "libpgquery_wrapper.$LIBRARY_EXT" "src/PgQuery.NET/runtimes/$TARGET_RID/native/"
+    echo "Copying native library to src/GrepSQL/runtimes/$TARGET_RID/native/"
+    cp "libpgquery_wrapper.$LIBRARY_EXT" "src/GrepSQL/runtimes/$TARGET_RID/native/"
 fi
 
 # Step 4: Generate protobuf files
 echo "🔧 Generating protobuf files..."
 chmod +x scripts/generate_protos.sh
-./scripts/generate_protos.sh
+if [ ! -f "src/GrepSQL/AST/Generated/PgQuery.g.cs" ]; then
+    echo "Protobuf files not found, running generation..."
+    ./scripts/generate_protos.sh
+    ls -la src/GrepSQL/AST/Generated/ || echo "Directory doesn't exist"
+fi
 
 # Step 5: Verify protobuf generation
-if [ ! -f "src/PgQuery.NET/AST/Generated/PgQuery.g.cs" ]; then
+if [ ! -f "src/GrepSQL/AST/Generated/PgQuery.g.cs" ]; then
     echo "❌ Protobuf generation failed or files not found"
     echo "Attempting to list generated files:"
-    ls -la src/PgQuery.NET/AST/Generated/ || echo "Directory doesn't exist"
+    ls -la src/GrepSQL/AST/Generated/ || echo "Directory doesn't exist"
     exit 1
 fi
 
@@ -135,14 +140,14 @@ else
 fi
 
 # Step 7: Run tests (if they exist)
-if [ -d "tests" ] && [ -f "tests/PgQuery.NET.Tests.csproj" ]; then
-    echo "🧪 Running tests..."
-    dotnet test --configuration Release --verbosity minimal
+if [ -d "tests" ] && [ -f "tests/GrepSQL.Tests.csproj" ]; then
+    echo "�� Running tests..."
+    dotnet test --configuration Release --no-build --verbosity normal
 fi
 
 # Step 8: Create NuGet package
 echo "📦 Creating NuGet package..."
-dotnet pack src/PgQuery.NET --configuration Release --output ./artifacts
+dotnet pack src/GrepSQL --configuration Release --output ./artifacts
 
 echo ""
 echo "🎉 Build completed successfully!"
@@ -153,7 +158,7 @@ echo "  Library Extension: $LIBRARY_EXT"
 echo "  Generated Libraries:"
 ls -la "runtimes/$TARGET_RID/native/" 2>/dev/null || echo "    No runtime libraries found"
 echo "  Generated Protobuf Files:"
-ls -la "src/PgQuery.NET/AST/Generated/"*.cs 2>/dev/null || echo "    No protobuf files found"
+ls -la "src/GrepSQL/AST/Generated/"*.cs 2>/dev/null || echo "    No protobuf files found"
 echo "  NuGet Packages:"
 ls -la "./artifacts/"*.nupkg 2>/dev/null || echo "    No packages found"
 

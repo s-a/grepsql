@@ -1,4 +1,4 @@
-// PgQuery.NET - A comprehensive C# wrapper for libpg_query
+// GrepSQL - A comprehensive C# wrapper for libpg_query
 // Provides easy, safe access to PostgreSQL's query parser from .NET
 
 using System;

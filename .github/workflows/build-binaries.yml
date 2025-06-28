@@ -118,8 +118,8 @@ jobs:
           fi
           
           # Copy to runtime directories
-          mkdir -p "src/PgQuery.NET/runtimes/${{ matrix.platform }}/native"
-          cp "libpgquery_wrapper.$LIBRARY_EXT" "src/PgQuery.NET/runtimes/${{ matrix.platform }}/native/"
+          mkdir -p "src/GrepSQL/runtimes/${{ matrix.platform }}/native"
+          cp "libpgquery_wrapper.$LIBRARY_EXT" "src/GrepSQL/runtimes/${{ matrix.platform }}/native/"
 
       - name: Build native libraries (Windows)
         if: runner.os == 'Windows'
@@ -134,8 +134,8 @@ jobs:
           cd ..
           
           REM Create placeholder directory structure
-          mkdir "src\PgQuery.NET\runtimes\win-x64\native"
-          echo "Windows native libraries would go here" > "src\PgQuery.NET\runtimes\win-x64\native\placeholder.txt"
+          mkdir "src\GrepSQL\runtimes\win-x64\native"
+          echo "Windows native libraries would go here" > "src\GrepSQL\runtimes\win-x64\native\placeholder.txt"
 
       - name: Restore dependencies
         run: dotnet restore

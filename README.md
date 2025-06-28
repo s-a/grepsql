@@ -1,4 +1,4 @@
-# PgQuery.NET
+# GrepSQL
 
 A comprehensive .NET wrapper for libpg_query, providing PostgreSQL query parsing and advanced SQL pattern matching capabilities with a **clean, object-oriented architecture**.
 
@@ -26,7 +26,7 @@ chmod +x GrepSQL
 
 ### NuGet Package (.NET Library)
 ```bash
-dotnet add package PgQuery.NET
+dotnet add package GrepSQL
 ```
 ## Features
 
@@ -205,7 +205,7 @@ chmod +x grepsql.sh
 
 4. Use in your .NET code:
 ```csharp
-using PgQuery.NET.SQL;
+using GrepSQL.SQL;
 
 var sql = "SELECT name FROM users WHERE age > 18";
 var matches = PatternMatcher.Search("(... (whereClause ...))", sql);
@@ -523,10 +523,6 @@ The `grepsql.sh` script supports the following options:
 # Find schema references
 ./grepsql.sh "(schemaname _)" *.sql
 ```
-
-## 🏗️ **Architecture**
-
-
 
 
 ## 🤝 **Contributing**

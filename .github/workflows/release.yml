@@ -48,9 +48,9 @@ jobs:
     - name: Update version in project files
       run: |
         # Update version in csproj files
-        sed -i 's/<Version>.*<\/Version>/<Version>${{ github.event.inputs.version }}<\/Version>/' src/PgQuery.NET/PgQuery.NET.csproj
-        sed -i 's/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>${{ github.event.inputs.version }}<\/AssemblyVersion>/' src/PgQuery.NET/PgQuery.NET.csproj
-        sed -i 's/<FileVersion>.*<\/FileVersion>/<FileVersion>${{ github.event.inputs.version }}<\/FileVersion>/' src/PgQuery.NET/PgQuery.NET.csproj
+        sed -i 's/<Version>.*<\/Version>/<Version>${{ github.event.inputs.version }}<\/Version>/' src/GrepSQL/GrepSQL.csproj
+        sed -i 's/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>${{ github.event.inputs.version }}<\/AssemblyVersion>/' src/GrepSQL/GrepSQL.csproj
+        sed -i 's/<FileVersion>.*<\/FileVersion>/<FileVersion>${{ github.event.inputs.version }}<\/FileVersion>/' src/GrepSQL/GrepSQL.csproj
         
         # Update GrepSQL version
         sed -i 's/<Version>.*<\/Version>/<Version>${{ github.event.inputs.version }}<\/Version>/' src/GrepSQL/GrepSQL/GrepSQL.csproj
@@ -74,7 +74,7 @@ jobs:
         
         # Create release notes
         cat > release_notes.md << EOF
-        ## 🚀 PgQuery.NET v${{ github.event.inputs.version }}
+        ## 🚀 GrepSQL v${{ github.event.inputs.version }}
         
         ### ✨ Features
         - Advanced SQL pattern matching with s-expression support
@@ -86,13 +86,13 @@ jobs:
         $COMMITS
         
         ### 📦 Downloads
-        - **NuGet Package**: Available on [NuGet.org](https://www.nuget.org/packages/PgQuery.NET/)
+        - **NuGet Package**: Available on [NuGet.org](https://www.nuget.org/packages/GrepSQL/)
         - **GrepSQL Binaries**: Download platform-specific binaries below
         
         ### 🛠️ Usage
         \`\`\`bash
         # Install via .NET CLI
-        dotnet add package PgQuery.NET
+        dotnet add package GrepSQL
         
         # Use GrepSQL
         grepsql -p "(relname \"users\")" --from-sql "SELECT * FROM users" --highlight
@@ -121,7 +121,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: v${{ github.event.inputs.version }}
-        release_name: 🚀 PgQuery.NET v${{ github.event.inputs.version }}
+        release_name: 🚀 GrepSQL v${{ github.event.inputs.version }}
         body_path: release_notes.md
         draft: false
         prerelease: ${{ github.event.inputs.prerelease }}

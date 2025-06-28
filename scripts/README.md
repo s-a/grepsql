@@ -1,6 +1,6 @@
-# PgQuery.NET Build Scripts
+# GrepSQL Build Scripts
 
-This directory contains improved build scripts for PgQuery.NET that handle native library compilation, protobuf generation, and cross-platform builds.
+This directory contains improved build scripts for GrepSQL that handle native library compilation, protobuf generation, and cross-platform builds.
 
 ## 🚀 Quick Start
 
@@ -118,15 +118,15 @@ runtimes/
 ### Protobuf Classes
 Generated C# classes from `libpg_query/protobuf/pg_query.proto`:
 ```
-src/PgQuery.NET/AST/Generated/
-└── PgQuery.g.cs
+src/GrepSQL/AST/Generated/
+└── GrepSQL.g.cs
 ```
 
 ### NuGet Package
 Final package in:
 ```
 artifacts/
-└── PgQuery.NET.{version}.nupkg
+└── GrepSQL.{version}.nupkg
 ```
 
 ## 🔍 Troubleshooting
@@ -176,7 +176,7 @@ make
 2. **Generate protobuf manually:**
 ```bash
 protoc --proto_path=libpg_query/protobuf \
-       --csharp_out=src/PgQuery.NET/AST/Generated \
+       --csharp_out=src/GrepSQL/AST/Generated \
        libpg_query/protobuf/pg_query.proto
 ```
 

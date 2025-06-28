@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# PgQuery.NET Automated Test Runner
-# This script demonstrates the new automated testing capabilities
+# GrepSQL Automated Test Runner
 
-echo "🧪 PgQuery.NET Automated Test Suite"
+# Test runner script for GrepSQL
+echo "🧪 GrepSQL Automated Test Suite"
 echo "===================================="
 echo
 
-# Build the project first
-echo "📦 Building project..."
-dotnet build src/PgQuery.NET/ --configuration Release
+# Build the main project
+echo "📦 Building GrepSQL..."
+dotnet build src/GrepSQL/ --configuration Release
 if [ $? -ne 0 ]; then
     echo "❌ Build failed"
     exit 1
@@ -20,19 +20,19 @@ echo
 # Run AnalysisNode tests (new fluent API)
 echo "🔍 Running AnalysisNode Tests (New Fluent API)..."
 echo "These tests demonstrate the new Node wrapper with embedded pattern matching:"
-dotnet test tests/PgQuery.NET.Tests/ --filter "FullyQualifiedName~NodeTests" --verbosity normal
+dotnet test tests/GrepSQL.Tests/ --filter "FullyQualifiedName~NodeTests" --verbosity normal
 echo
 
 # Run a subset of working Postgresql tests
 echo "🐘 Running Postgresql Class Tests..."
 echo "These tests demonstrate the new centralized PostgreSQL parsing functionality:"
-dotnet test tests/PgQuery.NET.Tests/ --filter "FullyQualifiedName~PostgresqlTests.AttributeNames" --verbosity normal
+dotnet test tests/GrepSQL.Tests/ --filter "FullyQualifiedName~PostgresqlTests.AttributeNames" --verbosity normal
 echo
 
 # Run SqlPatternMatcher tests (existing functionality)
 echo "🔎 Running SqlPatternMatcher Tests..."
 echo "These tests verify the core pattern matching functionality:"
-dotnet test tests/PgQuery.NET.Tests/ --filter "FullyQualifiedName~SqlPatternMatcherTests.SqlPatternMatcher_BasicPatternMatching_Works" --verbosity normal
+dotnet test tests/GrepSQL.Tests/ --filter "FullyQualifiedName~SqlPatternMatcherTests.SqlPatternMatcher_BasicPatternMatching_Works" --verbosity normal
 echo
 
 echo "📊 Test Summary"

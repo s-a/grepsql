@@ -25,7 +25,7 @@
 
 ### .NET Development
 - **Follow C# coding standards** - Use PascalCase for public members, camelCase for private fields
-- **Maintain existing namespace structure** - Keep PgQuery.NET namespace organization
+- **Maintain existing namespace structure** - Keep GrepSQL namespace organization
 - **Document public APIs** - All public methods and classes should have XML documentation
 - **Handle errors gracefully** - Use PgQueryException for query parsing errors
 - **Write unit tests** - All new functionality should include corresponding tests
@@ -160,4 +160,4 @@ The grepsql.sh script is the primary interface for this library. All development
 - How can the CLI tool help understand the feature?
 - What examples would demonstrate the capability?
 
-**Remember: grepsql.sh is not just a tool, it's the main way users will interact with and understand PgQuery.NET capabilities.** 
+**Remember: grepsql.sh is not just a tool, it's the main way users will interact with and understand GrepSQL capabilities.** 

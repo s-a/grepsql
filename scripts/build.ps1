@@ -1,4 +1,4 @@
-# PgQuery.NET Build Script for Windows
+# GrepSQL Build Script for Windows
 # Requires: Visual Studio Build Tools, Git, .NET SDK, Protocol Buffers compiler
 
 param(
@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "🏗️  Building PgQuery.NET with libpg_query (Windows)" -ForegroundColor Green
+Write-Host "🏗️  Building GrepSQL with libpg_query (Windows)" -ForegroundColor Green
 
 # Get script directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -124,7 +124,7 @@ if (-not $SkipNative) {
     }
     
     # Also copy to project runtimes directory
-    $ProjectRuntimeDir = "src\PgQuery.NET\runtimes\$TargetRid\native"
+    $ProjectRuntimeDir = "src\GrepSQL\runtimes\$TargetRid\native"
     New-Item -Path $ProjectRuntimeDir -ItemType Directory -Force | Out-Null
     
     foreach ($lib in $LibraryFiles) {
@@ -156,7 +156,7 @@ if (-not $SkipProtobuf) {
     $GrpcToolsPath = "$env:USERPROFILE\.nuget\packages\grpc.tools"
     if (-not (Test-Path $GrpcToolsPath)) {
         Write-Host "Installing Grpc.Tools..."
-        & dotnet add "src\PgQuery.NET" package Grpc.Tools --version 2.72.0
+        & dotnet add "src\GrepSQL" package Grpc.Tools --version 2.72.0
     }
     
     # Find the latest version and appropriate platform tools
@@ -171,7 +171,7 @@ if (-not $SkipProtobuf) {
     
     # Generate protobuf files
     $ProtoSrc = "libpg_query\protobuf"
-    $ProtoOut = "src\PgQuery.NET\AST\Generated"
+    $ProtoOut = "src\GrepSQL\AST\Generated"
     
     New-Item -Path $ProtoOut -ItemType Directory -Force | Out-Null
     
@@ -211,7 +211,7 @@ if (-not $SkipBuild) {
     Write-Host "✅ Build completed successfully" -ForegroundColor Green
     
     # Run tests if they exist
-    if (Test-Path "tests\PgQuery.NET.Tests.csproj") {
+    if (Test-Path "tests\GrepSQL.Tests.csproj") {
         Write-Host "🧪 Running tests..." -ForegroundColor Yellow
         & dotnet test --configuration $Configuration --verbosity minimal
         if ($LASTEXITCODE -ne 0) {
@@ -222,7 +222,7 @@ if (-not $SkipBuild) {
     # Create NuGet package
     Write-Host "📦 Creating NuGet package..." -ForegroundColor Yellow
     New-Item -Path "artifacts" -ItemType Directory -Force | Out-Null
-    & dotnet pack "src\PgQuery.NET" --configuration $Configuration --output "artifacts"
+    & dotnet pack "src\GrepSQL" --configuration $Configuration --output "artifacts"
 }
 
 Write-Host ""
@@ -237,9 +237,9 @@ if (Test-Path "runtimes\$TargetRid\native") {
     Get-ChildItem "runtimes\$TargetRid\native" | ForEach-Object { Write-Host "    $($_.Name)" }
 }
 
-if (Test-Path "src\PgQuery.NET\AST\Generated") {
+if (Test-Path "src\GrepSQL\AST\Generated") {
     Write-Host "  Generated Protobuf Files:"
-    Get-ChildItem "src\PgQuery.NET\AST\Generated\*.cs" | ForEach-Object { Write-Host "    $($_.Name)" }
+    Get-ChildItem "src\GrepSQL\AST\Generated\*.cs" | ForEach-Object { Write-Host "    $($_.Name)" }
 }
 
 if (Test-Path "artifacts") {

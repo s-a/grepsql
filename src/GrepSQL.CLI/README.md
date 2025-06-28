@@ -264,7 +264,7 @@ This will show:
 
 ## Contributing
 
-This tool is built on top of [PgQuery.NET](../PgQuery.NET) and uses the fixed SqlPatternMatcher for pattern matching capabilities.
+This tool is built on top of [GrepSQL](../GrepSQL) and uses the fixed SqlPatternMatcher for pattern matching capabilities.
 
 ## 🔥 Advanced Examples
 

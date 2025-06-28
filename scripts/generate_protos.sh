@@ -7,7 +7,7 @@ PROJECT_ROOT="$SCRIPT_DIR/.."
 
 # Protobuf source and output directories
 PROTO_SRC="$PROJECT_ROOT/libpg_query/protobuf"
-PROTO_OUT="$PROJECT_ROOT/src/PgQuery.NET/AST/Generated"
+PROTO_OUT="$PROJECT_ROOT/src/GrepSQL/AST/Generated"
 
 echo "🔍 Generating protobuf files..."
 echo "Proto source: $PROTO_SRC"
@@ -53,7 +53,7 @@ find_grpc_tools() {
     
     if [ ! -d "$base_path" ]; then
         echo "❌ Grpc.Tools not found. Installing..."
-        dotnet add "$PROJECT_ROOT/src/PgQuery.NET" package Grpc.Tools --version 2.72.0
+        dotnet add "$PROJECT_ROOT/src/GrepSQL" package Grpc.Tools --version 2.72.0
     fi
     
     # Find latest version
@@ -104,7 +104,7 @@ PLUGIN_PATH=$(find_grpc_tools)
 if [ $? -ne 0 ] || [ ! -d "$PLUGIN_PATH" ]; then
     echo "❌ Could not find gRPC tools."
     echo "Installing Grpc.Tools package..."
-    dotnet add "$PROJECT_ROOT/src/PgQuery.NET" package Grpc.Tools --version 2.72.0
+    dotnet add "$PROJECT_ROOT/src/GrepSQL" package Grpc.Tools --version 2.72.0
     PLUGIN_PATH=$(find_grpc_tools)
 fi
 

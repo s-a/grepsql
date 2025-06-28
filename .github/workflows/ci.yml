@@ -121,10 +121,9 @@ jobs:
           fi
           
           # Copy to runtime directories
-          mkdir -p "src/PgQuery.NET/runtimes/$TARGET_RID/native"
-          if [ -f "libpgquery_wrapper.$LIBRARY_EXT" ]; then
-            cp "libpgquery_wrapper.$LIBRARY_EXT" "src/PgQuery.NET/runtimes/$TARGET_RID/native/"
-          fi
+          mkdir -p "src/GrepSQL/runtimes/$TARGET_RID/native"
+          echo "Created: src/GrepSQL/runtimes/$TARGET_RID/native/"
+          cp "libpgquery_wrapper.$LIBRARY_EXT" "src/GrepSQL/runtimes/$TARGET_RID/native/"
 
       - name: Restore dependencies
         run: dotnet restore
@@ -137,13 +136,10 @@ jobs:
         shell: bash
         run: |
           echo "=== Main project output directory ==="
-          ls -la src/PgQuery.NET/bin/Release/net8.0/ || echo "Main project bin not found"
-          
-          echo "=== Native libraries in source ==="
-          find src/PgQuery.NET/runtimes/ -type f 2>/dev/null || echo "No runtimes directory"
-          
-          echo "=== Files in workspace root ==="
-          ls -la libpgquery_wrapper.* 2>/dev/null || echo "No wrapper libraries in root"
+          ls -la src/GrepSQL/bin/Release/net8.0/ || echo "Main project bin not found"
+          echo "Contents of src/GrepSQL/:"
+          ls -la src/GrepSQL/ || echo "GrepSQL directory not found"
+          find src/GrepSQL/runtimes/ -type f 2>/dev/null || echo "No runtimes directory"
 
       - name: Copy native libraries to test project
         if: matrix.os != 'windows-latest'
@@ -163,25 +159,22 @@ jobs:
           fi
           
           # Copy native libraries to test project output
-          TEST_OUTPUT_DIR="tests/PgQuery.NET.Tests/bin/Release/net9.0"
+          TEST_OUTPUT_DIR="tests/GrepSQL.Tests/bin/Release/net9.0"
           mkdir -p "$TEST_OUTPUT_DIR/runtimes/$TARGET_RID/native"
           
-          if [ -f "src/PgQuery.NET/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" ]; then
-            # Copy to runtimes subfolder (standard .NET location)
-            cp "src/PgQuery.NET/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" "$TEST_OUTPUT_DIR/runtimes/$TARGET_RID/native/"
-            
-            # Also copy directly to output directory root for fallback
-            cp "src/PgQuery.NET/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" "$TEST_OUTPUT_DIR/"
-            
-            echo "Copied native library to test output directory"
-            echo "Runtime location:"
-            ls -la "$TEST_OUTPUT_DIR/runtimes/$TARGET_RID/native/"
-            echo "Direct location:"
-            ls -la "$TEST_OUTPUT_DIR/libpgquery_wrapper.$LIBRARY_EXT"
+          if [ -f "src/GrepSQL/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" ]; then
+            mkdir -p "$TEST_OUTPUT_DIR/runtimes/$TARGET_RID/native"
+            cp "src/GrepSQL/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" "$TEST_OUTPUT_DIR/runtimes/$TARGET_RID/native/"
+            echo "Copied library to test runtimes directory"
+            # Also copy to test output directory root for fallback
+            cp "src/GrepSQL/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" "$TEST_OUTPUT_DIR/"
+            echo "Copied library to test output root"
+            echo "Test directory contents:"
+            ls -la "$TEST_OUTPUT_DIR/"
           else
-            echo "Warning: Native library not found at src/PgQuery.NET/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT"
-            echo "Available files in src/PgQuery.NET/runtimes/:"
-            find src/PgQuery.NET/runtimes/ -name "*.so" -o -name "*.dylib" || echo "No native libraries found"
+            echo "Warning: Native library not found at src/GrepSQL/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT"
+            echo "Available files in src/GrepSQL/runtimes/:"
+            find src/GrepSQL/runtimes/ -name "*.so" -o -name "*.dylib" || echo "No native libraries found"
           fi
 
       - name: Run tests
@@ -232,7 +225,7 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Pack NuGet package
-      run: dotnet pack src/PgQuery.NET/PgQuery.NET.csproj --configuration Release --no-build --output ./artifacts
+      run: dotnet pack src/GrepSQL/GrepSQL.csproj --configuration Release --no-build --output ./artifacts
 
     - name: Upload package artifacts
       uses: actions/upload-artifact@v4
