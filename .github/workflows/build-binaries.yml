@@ -47,101 +47,35 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Build native libraries (Unix)
+      - name: Run comprehensive build script (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          cd libpg_query
-          make clean
-          make
-          cd ..
+          echo "🏗️ Running comprehensive build script..."
+          chmod +x scripts/build.sh
+          ./scripts/build.sh
           
-          # Determine library extension
-          if [[ "${{ matrix.platform }}" == *"linux"* ]]; then
-            LIBRARY_EXT="so"
-          else
-            LIBRARY_EXT="dylib"
-          fi
-          
-          # Create wrapper if it doesn't exist
-          if [ ! -f "wrapper.c" ]; then
-            cat > wrapper.c << 'EOF'
-          #include "libpg_query/pg_query.h"
-          
-          PgQueryParseResult pg_query_parse_wrapper(const char* input) {
-              return pg_query_parse(input);
-          }
-          
-          void pg_query_free_parse_result_wrapper(PgQueryParseResult result) {
-              pg_query_free_parse_result(result);
-          }
-          
-          PgQueryProtobufParseResult pg_query_parse_protobuf_wrapper(const char* input) {
-              return pg_query_parse_protobuf(input);
-          }
-          
-          void pg_query_free_protobuf_parse_result_wrapper(PgQueryProtobufParseResult result) {
-              pg_query_free_protobuf_parse_result(result);
-          }
-          
-          PgQueryNormalizeResult pg_query_normalize_wrapper(const char* input) {
-              return pg_query_normalize(input);
-          }
-          
-          void pg_query_free_normalize_result_wrapper(PgQueryNormalizeResult result) {
-              pg_query_free_normalize_result(result);
-          }
-          
-          PgQueryFingerprintResult pg_query_fingerprint_wrapper(const char* input) {
-              return pg_query_fingerprint(input);
-          }
-          
-          void pg_query_free_fingerprint_result_wrapper(PgQueryFingerprintResult result) {
-              pg_query_free_fingerprint_result(result);
-          }
-          
-          PgQueryScanResult pg_query_scan_wrapper(const char* input) {
-              return pg_query_scan(input);
-          }
-          
-          void pg_query_free_scan_result_wrapper(PgQueryScanResult result) {
-              pg_query_free_scan_result(result);
-          }
-          EOF
-          fi
-          
-          # Compile wrapper
-          if [[ "${{ matrix.platform }}" == *"linux"* ]]; then
-            gcc -shared -fPIC -I. -o "libpgquery_wrapper.so" wrapper.c libpg_query/libpg_query.a
-          else
-            gcc -shared -fPIC -I. -o "libpgquery_wrapper.dylib" wrapper.c libpg_query/libpg_query.a
-          fi
-          
-          # Copy to runtime directories
-          mkdir -p "src/GrepSQL/runtimes/${{ matrix.platform }}/native"
-          cp "libpgquery_wrapper.$LIBRARY_EXT" "src/GrepSQL/runtimes/${{ matrix.platform }}/native/"
+          # Verify native library was created
+          echo "📋 Checking generated native libraries:"
+          find src/GrepSQL/runtimes/ -name "libpgquery_wrapper.*" -type f || echo "No native libraries found"
 
-      - name: Build native libraries (Windows)
+      - name: Build for Windows (Placeholder)
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          echo "Building native libraries for Windows..."
-          cd libpg_query
+          echo "🏗️ Building for Windows (partial support)..."
           
-          REM Use vcpkg or existing build system
-          REM For now, we'll use pre-built libraries or skip native build
-          echo "Windows native build requires MSVC - skipping for now"
-          cd ..
+          REM Initialize submodules
+          git submodule update --init --recursive
           
           REM Create placeholder directory structure
-          mkdir "src\GrepSQL\runtimes\win-x64\native"
-          echo "Windows native libraries would go here" > "src\GrepSQL\runtimes\win-x64\native\placeholder.txt"
-
-      - name: Restore dependencies
-        run: dotnet restore
-
-      - name: Build solution
-        run: dotnet build --configuration Release --no-restore
+          mkdir "src\GrepSQL\runtimes\win-x64\native" 2>nul
+          echo Windows native library placeholder > "src\GrepSQL\runtimes\win-x64\native\placeholder.txt"
+          
+          REM Build .NET project only
+          dotnet restore
+          dotnet build --configuration Release --no-restore
+          echo "⚠️ Windows build completed with placeholder native library"
 
       - name: Test (non-Windows)
         if: runner.os != 'Windows'

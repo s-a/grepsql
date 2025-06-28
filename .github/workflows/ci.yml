@@ -33,103 +33,29 @@ jobs:
             8.0.x
             9.0.x
 
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
-
-      - name: Build native libraries
+      - name: Run comprehensive build script
         shell: bash
         run: |
           # Skip entire native build on Windows - needs different toolchain
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            echo "🏗️ Building for Windows (partial support)..."
             echo "Skipping native library build on Windows - .NET code will be tested without native dependencies"
             echo "Windows would need MSVC/Visual Studio build tools for native compilation"
+            
+            # Initialize submodules and build .NET only
+            git submodule update --init --recursive
+            dotnet restore
+            dotnet build --configuration Release --no-restore
             exit 0
           fi
           
-          cd libpg_query
-          make clean
-          make
-          cd ..
+          echo "🏗️ Running comprehensive build script..."
+          chmod +x scripts/build.sh
+          ./scripts/build.sh
           
-          # Determine platform and create wrapper
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            LIBRARY_EXT="so"
-            TARGET_RID="linux-x64"
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            LIBRARY_EXT="dylib"
-            if [[ $(uname -m) == "arm64" ]]; then
-              TARGET_RID="osx-arm64"
-            else
-              TARGET_RID="osx-x64"
-            fi
-          fi
-          
-          # Create wrapper.c if it doesn't exist
-          if [ ! -f "wrapper.c" ]; then
-            cat > wrapper.c << 'EOF'
-          #include "libpg_query/pg_query.h"
-          
-          // Simple wrapper to export pg_query functions
-          PgQueryParseResult pg_query_parse_wrapper(const char* input) {
-              return pg_query_parse(input);
-          }
-          
-          void pg_query_free_parse_result_wrapper(PgQueryParseResult result) {
-              pg_query_free_parse_result(result);
-          }
-          
-          PgQueryNormalizeResult pg_query_normalize_wrapper(const char* input) {
-              return pg_query_normalize(input);
-          }
-          
-          void pg_query_free_normalize_result_wrapper(PgQueryNormalizeResult result) {
-              pg_query_free_normalize_result(result);
-          }
-          
-          // Protobuf wrapper functions
-          PgQueryProtobufParseResult pg_query_parse_protobuf_wrapper(const char* input) {
-              return pg_query_parse_protobuf(input);
-          }
-          
-          void pg_query_free_protobuf_parse_result_wrapper(PgQueryProtobufParseResult result) {
-              pg_query_free_protobuf_parse_result(result);
-          }
-          
-          PgQueryFingerprintResult pg_query_fingerprint_wrapper(const char* input) {
-              return pg_query_fingerprint(input);
-          }
-          
-          void pg_query_free_fingerprint_result_wrapper(PgQueryFingerprintResult result) {
-              pg_query_free_fingerprint_result(result);
-          }
-          
-          PgQueryScanResult pg_query_scan_wrapper(const char* input) {
-              return pg_query_scan(input);
-          }
-          
-          void pg_query_free_scan_result_wrapper(PgQueryScanResult result) {
-              pg_query_free_scan_result(result);
-          }
-          EOF
-          fi
-          
-          # Compile wrapper
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            gcc -shared -fPIC -I. -o "libpgquery_wrapper.so" wrapper.c libpg_query/libpg_query.a
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            gcc -shared -fPIC -I. -o "libpgquery_wrapper.dylib" wrapper.c libpg_query/libpg_query.a
-          fi
-          
-          # Copy to runtime directories
-          mkdir -p "src/GrepSQL/runtimes/$TARGET_RID/native"
-          echo "Created: src/GrepSQL/runtimes/$TARGET_RID/native/"
-          cp "libpgquery_wrapper.$LIBRARY_EXT" "src/GrepSQL/runtimes/$TARGET_RID/native/"
-
-      - name: Restore dependencies
-        run: dotnet restore
-
-      - name: Build solution
-        run: dotnet build --configuration Release --no-restore
+          # Verify the build was successful
+          echo "📋 Verifying build output:"
+          find src/GrepSQL/runtimes/ -name "libpgquery_wrapper.*" -type f || echo "No native libraries found"
 
       - name: Debug - Show available files
         if: matrix.os != 'windows-latest'
