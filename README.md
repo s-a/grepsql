@@ -2,34 +2,6 @@
 
 A comprehensive .NET wrapper for libpg_query, providing PostgreSQL query parsing and advanced SQL pattern matching capabilities with a **clean, object-oriented architecture**.
 
-## 📦 Quick Install
-
-### Pre-built Binaries (Recommended)
-Download ready-to-use binaries from [GitHub Releases](https://github.com/jonatas/grepsql/releases):
-
-- **Linux (x64)**: `grepsql-linux-x64.tar.gz`
-- **macOS (Intel)**: `grepsql-osx-x64.tar.gz` 
-- **macOS (Apple Silicon)**: `grepsql-osx-arm64.tar.gz`
-- **Windows (x64)**: `grepsql-win-x64.zip`
-
-```bash
-# Download and extract (example for Linux)
-wget https://github.com/jonatas/grepsql/releases/latest/download/grepsql-linux-x64.tar.gz
-tar -xzf grepsql-linux-x64.tar.gz
-chmod +x GrepSQL
-
-# Use immediately
-./GrepSQL "SelectStmt" *.sql --highlight
-```
-
-> **🚀 Automated Releases**: Cross-platform binaries are automatically built and released when changes are merged to the main branch or when version tags are pushed.
-
-### NuGet Package (.NET Library)
-```bash
-dotnet add package GrepSQL
-```
-## Features
-
 ### 1. 🔍 **GrepSQL - Command Line Tool**
 Search through SQL files with powerful pattern matching:
 ```bash
@@ -271,8 +243,6 @@ bool matches = PatternMatcher.Match(pattern, sql);
 
 // Search for all matching nodes
 List<IMessage> results = PatternMatcher.Search(pattern, sql);
-
-
 ```
 
 #### **Advanced Features**
@@ -295,7 +265,6 @@ var node = parseResult.ParseTree.Stmts[0].Stmt;
 
 bool matches = PatternMatcher.Match(node, pattern);
 List<IMessage> results = PatternMatcher.Search(node, pattern);
-
 ```
 
 ### **Postgres Class**
@@ -358,6 +327,165 @@ The `grepsql.sh` script supports the following options:
 ```
 
 ## 🧪 **Examples**
+
+### **Understanding Expression Trees (`-X`)**
+
+The `-X` or `--only-exp` flag shows how GrepSQL interprets your patterns internally. This is invaluable for debugging complex patterns and understanding the pattern language.
+
+#### **Basic Expression Trees**
+```bash
+# Simple pattern
+./grepsql.sh -X -p "SelectStmt"
+# Output: Find(SelectStmt)
+
+# Attribute matching
+./grepsql.sh -X -p "(relname \"users\")"
+# Output: MatchAttribute(relname, "users")
+
+# Wildcard matching
+./grepsql.sh -X -p "(relname _)"
+# Output: MatchAttribute(relname, _)
+```
+
+#### **Complex Pattern Analysis**
+```bash
+# Ellipsis navigation
+./grepsql.sh -X -p "..."
+# Output: HasChildren()
+
+./grepsql.sh -X -p "(... (relname \"users\"))"
+# Output: HasChildren(MatchAttribute(relname, "users"))
+
+# Nested patterns
+./grepsql.sh -X -p "(SelectStmt ... (relname \"users\"))"
+# Output: Find(Find(SelectStmt), HasChildren(MatchAttribute(relname, "users")))
+```
+
+#### **Pattern Debugging with `-X`**
+```bash
+# Debug complex logical patterns
+./grepsql.sh -X -p "{SelectStmt InsertStmt}"
+./grepsql.sh -X -p "[SelectStmt A_Expr]"
+./grepsql.sh -X -p "!A_Expr"
+```
+
+Use `-X` when your patterns aren't matching as expected - it shows exactly how the parser interprets your pattern syntax.
+
+### **Building Patterns with AST Trees (`--tree`)**
+
+The `--tree` flag displays the AST structure of your SQL, making it easy to build patterns progressively. This is your roadmap for pattern construction.
+
+#### **Step 1: See the Full Structure**
+```bash
+# Start with any simple pattern to see the tree
+./grepsql.sh -p "_" --tree --tree-mode full --from-sql "SELECT name FROM users WHERE id = 1"
+```
+Output:
+```
+[TREE]
+ParseResult
+  version: 170004
+  stmts: [1 items]
+    [0]:
+      RawStmt
+        stmt:
+          Node
+            select_stmt:
+              SelectStmt
+                target_list: [1 items]
+                  [0]:
+                from_clause: [1 items]
+                  [0]:
+                where_clause:
+                group_distinct: False
+                all: False
+```
+
+#### **Step 2: Build Patterns Progressively**
+
+**Start Broad:**
+```bash
+# Match any SELECT statement
+./grepsql.sh -p "SelectStmt" --from-sql "SELECT name FROM users WHERE id = 1"
+```
+
+**Get More Specific:**
+```bash
+# Now we know SelectStmt exists, let's find what's inside the from_clause
+./grepsql.sh -p "_" --tree --from-sql "SELECT name FROM users WHERE id = 1" | grep -A 20 from_clause
+```
+
+**Build Your Pattern:**
+```bash
+# Target the table name specifically
+./grepsql.sh -p "(SelectStmt ... (relname \"users\"))" --from-sql "SELECT name FROM users WHERE id = 1" --highlight
+```
+
+#### **Step 3: Progressive Pattern Development Tutorial**
+
+**Example: Finding SELECT statements with WHERE clauses**
+
+1. **Explore the structure:**
+```bash
+./grepsql.sh -p "_" --tree --tree-mode full --from-sql "SELECT * FROM products WHERE price > 100"
+```
+
+2. **Identify the expression structure in the output:**
+```
+Note: WHERE clauses contain A_Expr nodes for comparisons.
+Look for A_Expr patterns in the tree output to build your patterns.
+```
+
+3. **Build patterns incrementally:**
+```bash
+# Step 1: Match any SELECT
+./grepsql.sh -p "SelectStmt" --from-sql "SELECT * FROM products WHERE price > 100"
+
+# Step 2: Match SELECT with WHERE clause (contains A_Expr)
+./grepsql.sh -p "(SelectStmt ... A_Expr)" --from-sql "SELECT * FROM products WHERE price > 100"
+
+# Step 3: Match any comparison expression
+./grepsql.sh -p "(... A_Expr)" --from-sql "SELECT * FROM products WHERE price > 100"
+
+# Step 4: Match specific comparison operator
+./grepsql.sh -p "(SelectStmt ... (A_Expr ... (sval \">\")))" --from-sql "SELECT * FROM products WHERE price > 100"
+```
+
+#### **Step 4: Verify Your Patterns**
+```bash
+# Use highlighting to confirm your pattern matches what you expect
+./grepsql.sh -p "(SelectStmt ... (A_Expr ... (sval \">\")))" --from-sql "SELECT * FROM products WHERE price > 100" --highlight
+
+# Use expression tree to debug if not matching
+./grepsql.sh -X -p "(SelectStmt ... (A_Expr ... (sval \">\")))"
+```
+
+#### **Pro Tips for Pattern Development**
+
+1. **Always start with `--tree --tree-mode full`** to see the complete structure
+2. **Use `-X` to debug your patterns** when they don't match as expected  
+3. **Build incrementally** - start broad, then narrow down
+4. **Use `--highlight`** to visually confirm your matches
+5. **Test with multiple SQL examples** to ensure pattern robustness
+
+#### **Common Tree Navigation Patterns**
+```bash
+# Find any constant value
+./grepsql.sh -p "(... A_Const)" --tree --from-sql "SELECT 42, 'hello'"
+
+# Find any column reference  
+./grepsql.sh -p "(... ColumnRef)" --tree --from-sql "SELECT name, age FROM users"
+
+# Find any function call
+./grepsql.sh -p "(... FuncCall)" --tree --from-sql "SELECT COUNT(*) FROM users"
+
+# Find any table reference
+./grepsql.sh -p "(... RangeVar)" --tree --from-sql "SELECT * FROM users u JOIN orders o ON u.id = o.user_id"
+```
+
+This progressive approach using `--tree` and `-X` together makes pattern development systematic and predictable.
+
+
 
 ### **Finding Security Issues**
 ```bash
