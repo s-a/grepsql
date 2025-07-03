@@ -52,6 +52,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libc6-dev
+          # Workaround: ensure libdl is available for P/Invoke
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libdl.so.2 /usr/lib/libdl.so
+          echo "LD_LIBRARY_PATH=/usr/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Run comprehensive build script (Unix)
         if: runner.os != 'Windows'
