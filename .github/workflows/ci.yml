@@ -7,6 +7,14 @@ on:
     branches: [ main ]
   release:
     types: [ published ]
+  workflow_dispatch:  # Allow manual triggering for testing
+
+# Add permissions for GitHub token
+permissions:
+  contents: write
+  packages: write
+  pull-requests: read
+  actions: read
 
 env:
   DOTNET_VERSION: '8.0.x'
@@ -139,6 +147,14 @@ jobs:
     needs: test
     if: github.event_name == 'release'
     
+    # Specify the environment where the secret is stored
+    environment: CI
+    
+    # Add permissions for this job
+    permissions:
+      contents: read
+      packages: write
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -167,8 +183,10 @@ jobs:
 
     - name: Publish to NuGet (if main branch and release)
       if: github.ref == 'refs/heads/main' && github.event_name == 'release'
+      env:
+        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
       run: |
-        dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push ./artifacts/*.nupkg --api-key $NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
       continue-on-error: true
 
   release-binaries:
@@ -176,6 +194,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'release'
+    
+    # Add permissions for this job
+    permissions:
+      contents: write
+      
     strategy:
       matrix:
         runtime: [win-x64, linux-x64, osx-x64, osx-arm64]
@@ -203,14 +226,12 @@ jobs:
         fi
 
     - name: Upload release assets
-      uses: actions/upload-release-asset@v1
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          grepsql-${{ matrix.runtime }}.${{ matrix.runtime == 'win-x64' && 'zip' || 'tar.gz' }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./grepsql-${{ matrix.runtime }}.${{ matrix.runtime == 'win-x64' && 'zip' || 'tar.gz' }}
-        asset_name: grepsql-${{ matrix.runtime }}.${{ matrix.runtime == 'win-x64' && 'zip' || 'tar.gz' }}
-        asset_content_type: application/octet-stream
 
   benchmark:
     name: Performance Benchmarks
