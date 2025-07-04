@@ -8,6 +8,12 @@ on:
   release:
     types: [ published ]
   workflow_dispatch:  # Allow manual triggering for testing
+    inputs:
+      test_release:
+        description: 'Test release workflow (simulates release event)'
+        required: false
+        default: 'false'
+        type: boolean
 
 # Add permissions for GitHub token
 permissions:
@@ -145,10 +151,9 @@ jobs:
     name: Create NuGet Package
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || inputs.test_release == 'true'
     
-    # Specify the environment where the secret is stored
-    environment: CI
+    # Remove the environment specification and use built-in token
     
     # Add permissions for this job
     permissions:
@@ -166,6 +171,14 @@ jobs:
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
+    - name: Build native libraries
+      shell: bash
+      run: |
+        echo "Building native libraries for packaging"
+        git submodule update --init --recursive
+        chmod +x scripts/build.sh
+        ./scripts/build.sh
+
     - name: Restore dependencies
       run: dotnet restore
 
@@ -175,29 +188,55 @@ jobs:
     - name: Pack NuGet package
       run: dotnet pack src/GrepSQL/GrepSQL.csproj --configuration Release --no-build --output ./artifacts
 
+    - name: Debug - Show package contents
+      shell: bash
+      run: |
+        echo "=== Created packages ==="
+        ls -la ./artifacts/
+        echo "=== Package details ==="
+        dotnet nuget list source || echo "No sources configured"
+
     - name: Upload package artifacts
       uses: actions/upload-artifact@v4
       with:
         name: nuget-packages
         path: ./artifacts/*.nupkg
 
-    - name: Publish to NuGet (if main branch and release)
-      if: github.ref == 'refs/heads/main' && github.event_name == 'release'
+    - name: Publish to NuGet.org (if release)
+      if: github.event_name == 'release'
       env:
         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
       run: |
+        echo "Publishing to NuGet.org..."
         dotnet nuget push ./artifacts/*.nupkg --api-key $NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
       continue-on-error: true
+
+    - name: Publish to GitHub Packages (if release)
+      if: github.event_name == 'release'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "Publishing to GitHub Packages..."
+        dotnet nuget push ./artifacts/*.nupkg --api-key $GITHUB_TOKEN --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
+      continue-on-error: true
+
+    - name: Test mode - skip publishing
+      if: inputs.test_release == 'true'
+      run: |
+        echo "Test mode: Skipping package publishing"
+        echo "Would publish to NuGet.org with key: ${{ secrets.NUGET_API_KEY != '' && '[CONFIGURED]' || '[NOT CONFIGURED]' }}"
+        echo "Would publish to GitHub Packages with token: ${{ secrets.GITHUB_TOKEN != '' && '[AVAILABLE]' || '[NOT AVAILABLE]' }}"
 
   release-binaries:
     name: Create Release Binaries
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || inputs.test_release == 'true'
     
     # Add permissions for this job
     permissions:
       contents: write
+      actions: read
       
     strategy:
       matrix:
@@ -206,32 +245,62 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Setup .NET Core
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_FRAMEWORK_VERSION }}
 
+    - name: Build native libraries (non-Windows only)
+      if: matrix.runtime != 'win-x64'
+      shell: bash
+      run: |
+        echo "Building native libraries for ${{ matrix.runtime }}"
+        git submodule update --init --recursive
+        chmod +x scripts/build.sh
+        ./scripts/build.sh
+
     - name: Publish GrepSQL for ${{ matrix.runtime }}
       run: dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj --configuration Release --runtime ${{ matrix.runtime }} --self-contained true --output ./dist/${{ matrix.runtime }} -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+
+    - name: Debug - Show published files
+      shell: bash
+      run: |
+        echo "=== Published files for ${{ matrix.runtime }} ==="
+        ls -la ./dist/${{ matrix.runtime }}/
+        echo "=== Archive will be created from these files ==="
 
     - name: Create archive
       shell: bash
       run: |
         cd ./dist/${{ matrix.runtime }}
-        if [[ "${{ matrix.runtime }}" == win-* ]]; then
-          7z a ../../grepsql-${{ matrix.runtime }}.zip *
+        if [[ "${{ matrix.runtime }}" == "win-x64" ]]; then
+          zip -r ../../grepsql-${{ matrix.runtime }}.zip .
         else
-          tar czf ../../grepsql-${{ matrix.runtime }}.tar.gz *
+          tar czf ../../grepsql-${{ matrix.runtime }}.tar.gz .
         fi
+        cd ../..
+        echo "=== Created archive ==="
+        ls -la grepsql-${{ matrix.runtime }}.*
 
     - name: Upload release assets
+      if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
-        files: |
-          grepsql-${{ matrix.runtime }}.${{ matrix.runtime == 'win-x64' && 'zip' || 'tar.gz' }}
+        files: grepsql-${{ matrix.runtime }}.${{ matrix.runtime == 'win-x64' && 'zip' || 'tar.gz' }}
+        tag_name: ${{ github.ref_name }}
+        fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload test artifacts (test mode only)
+      if: inputs.test_release == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-release-${{ matrix.runtime }}
+        path: grepsql-${{ matrix.runtime }}.${{ matrix.runtime == 'win-x64' && 'zip' || 'tar.gz' }}
 
   benchmark:
     name: Performance Benchmarks
@@ -257,4 +326,33 @@ jobs:
         time dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "SelectStmt" --from-sql "$(printf 'SELECT id FROM users UNION %.0s' {1..100})" --count
         
         # Test complex pattern matching performance  
-        time dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "(... (whereClause ...))" --from-sql "SELECT * FROM users WHERE age > 18 AND status = 'active' AND created_at > '2024-01-01'" --count 
+        time dotnet run --project src/GrepSQL/GrepSQL --configuration Release -- -p "(... (whereClause ...))" --from-sql "SELECT * FROM users WHERE age > 18 AND status = 'active' AND created_at > '2024-01-01'" --count
+
+  debug-release:
+    name: Debug Release Information
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || inputs.test_release == 'true'
+    
+    permissions:
+      contents: read
+      
+    steps:
+    - name: Debug release context
+      shell: bash
+      run: |
+        echo "=== GitHub Context ==="
+        echo "Event name: ${{ github.event_name }}"
+        echo "Event action: ${{ github.event.action }}"
+        echo "Ref: ${{ github.ref }}"
+        echo "Ref name: ${{ github.ref_name }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "Repository owner: ${{ github.repository_owner }}"
+        echo "Actor: ${{ github.actor }}"
+        echo "Run ID: ${{ github.run_id }}"
+        echo "=== Token permissions ==="
+        echo "GITHUB_TOKEN is set: ${{ secrets.GITHUB_TOKEN != '' }}"
+        echo "=== Release event details ==="
+        echo "Release tag: ${{ github.event.release.tag_name }}"
+        echo "Release name: ${{ github.event.release.name }}"
+        echo "Release draft: ${{ github.event.release.draft }}"
+        echo "Release prerelease: ${{ github.event.release.prerelease }}"
