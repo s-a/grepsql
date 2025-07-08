@@ -42,5 +42,23 @@
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <DefineConstants>__WINDOWS__</DefineConstants>
   </PropertyGroup>
+  <Target Name="CopyNativeLibraryForTests" AfterTargets="Build">
+    <PropertyGroup>
+      <NativeLibSourceFolder>$(SolutionDir)src/GrepSQL/runtimes/$(RuntimeIdentifier)/native/</NativeLibSourceFolder>
+      <NativeLibFile>$([System.IO.Directory]::GetFiles($(NativeLibSourceFolder),
+        'libpgquery_wrapper.*')[0])</NativeLibFile>
+    </PropertyGroup>
 
+    <Message Text="[CI-TEST-FIX] Suche nach nativer Bibliothek: $(NativeLibFile)" Importance="high" />
+
+    <Copy
+      SourceFiles="$(NativeLibFile)"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(NativeLibFile)')"
+    />
+
+    <Message Text="[CI-TEST-FIX] Kopieren nach $(OutDir) war erfolgreich." Importance="high"
+      Condition="Exists('$(OutDir)$(NativeLibFile.Substring($(NativeLibSourceFolder.Length)))')" />
+  </Target>
 </Project>

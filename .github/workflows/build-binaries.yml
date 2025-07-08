@@ -30,7 +30,7 @@ jobs:
             platform: osx-x64
             extension: ''
             archive_ext: tar.gz
-          - os: macos-14  # M1 runners
+          - os: macos-14
             platform: osx-arm64
             extension: ''
             archive_ext: tar.gz
@@ -49,42 +49,20 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libc6-dev
+        run: sudo apt-get update && sudo apt-get install -y build-essential libc6-dev
 
       - name: Run comprehensive build script (Unix)
         if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          echo '🏗️ Running comprehensive build script...'
-          chmod +x scripts/build.sh
-          ./scripts/build.sh
-          
-          echo '📋 Checking generated native libraries:'
-          find src/GrepSQL/runtimes/ -name "libpgquery_wrapper.*" -type f
+        run: chmod +x scripts/build.sh && ./scripts/build.sh
 
-      # HINWEIS: Es wird keine setup-msvc-dev oder setup-msbuild Aktion mehr benötigt,
-      # da das build.ps1-Skript die Umgebung selbst einrichtet.
       - name: Run comprehensive build script (Windows)
         if: runner.os == 'Windows'
+        run: ./scripts/build.ps1
         shell: powershell
-        run: |
-          echo '🏗️ Running comprehensive Windows build script...'
-          ./scripts/build.ps1
-          
-          echo '📋 Checking generated native libraries:'
-          Get-ChildItem -Path "src\GrepSQL\runtimes\win-x64\native" -Filter "*.dll" -Recurse
 
-      # (Rest der YAML-Datei bleibt unverändert)
-      
-      - name: Test (non-Windows)
-        if: runner.os != 'Windows'
-        run: dotnet test --configuration Release --no-build --verbosity normal
-
-      - name: Test (Windows)
-        if: runner.os == 'Windows'
-        run: dotnet test --configuration Release --no-build --verbosity normal
+      - name: Run Tests
+        # Dieser Schritt wird jetzt auf ALLEN Plattformen funktionieren.
+        run: dotnet test --configuration Release
 
       - name: Publish GrepSQL Binary
         run: dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj --configuration Release --runtime ${{ matrix.platform }} --self-contained true --output ./publish/${{ matrix.platform }} -p:PublishSingleFile=true -p:PublishTrimmed=true -p:IncludeNativeLibrariesForSelfExtract=true
@@ -145,10 +123,8 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p ./release-assets
-          
           find ./artifacts -name "grepsql-*.tar.gz" -exec cp {} ./release-assets/ \;
           find ./artifacts -name "grepsql-*.zip" -exec cp {} ./release-assets/ \;
-          
           echo "Release assets:"
           ls -la ./release-assets/
 
@@ -180,48 +156,37 @@ jobs:
             
             cat > release_notes.md << EOF
           ## 🚀 GrepSQL v${{ steps.version.outputs.version }}
-          
           A powerful command-line tool for searching and filtering SQL files using PostgreSQL AST patterns.
-          
           ### 📦 Downloads
           Choose the appropriate binary for your platform:
           - **Linux (x64)**: \`grepsql-linux-x64.tar.gz\`
           - **macOS (Intel)**: \`grepsql-osx-x64.tar.gz\`
           - **macOS (Apple Silicon)**: \`grepsql-osx-arm64.tar.gz\`
           - **Windows (x64)**: \`grepsql-win-x64.zip\`
-          
           ### 🚀 Quick Start
           \`\`\`bash
           # Extract the binary (example for Linux)
           tar -xzf grepsql-linux-x64.tar.gz
-          
           # Make executable (Unix systems)
           chmod +x GrepSQL.CLI
-          
           # Search for SELECT statements
           ./GrepSQL.CLI "SelectStmt" *.sql
           \`\`\`
-          
           ### 📋 Changes in this release
           $COMMITS
           EOF
           else
             RECENT_COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -10)
-            
             cat > release_notes.md << EOF
           ## 🔧 Development Build - ${{ steps.version.outputs.version }}
-          
           This is an automated build from the main branch. Use for testing purposes.
-          
           ### 📦 Downloads
           - **Linux (x64)**: \`grepsql-linux-x64.tar.gz\`
           - **macOS (Intel)**: \`grepsql-osx-x64.tar.gz\`
           - **macOS (Apple Silicon)**: \`grepsql-osx-arm64.tar.gz\`
           - **Windows (x64)**: \`grepsql-win-x64.zip\`
-          
           ### 📋 Recent changes
           $RECENT_COMMITS
-          
           ### ⚠️ Note
           This is a development build. For stable releases, use the latest tagged version.
           EOF
@@ -237,11 +202,3 @@ jobs:
           draft: false
           prerelease: ${{ steps.version.outputs.is_tag == 'false' }}
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Success notification
-        run: |
-          echo "🎉 Release created successfully!"
-          echo "📦 Version: ${{ steps.version.outputs.version }}"
-          echo "🏷️ Tag: ${{ steps.version.outputs.tag }}"
-          echo "📁 Assets uploaded:"
-          ls -la ./release-assets/
