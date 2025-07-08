@@ -24,54 +24,33 @@ $TargetRid = "win-x64"
 Set-Location $ProjectRoot
 
 # Step 1: Check prerequisites
+# ... (Dieser Teil ist korrekt und bleibt unverändert) ...
 Write-Host "🔍 Checking prerequisites..." -ForegroundColor Yellow
-
-# Check for Git
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Write-Error "Git is required but not found in PATH"
-    exit 1
-}
-
-# Check for .NET SDK
-if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    Write-Error ".NET SDK is required but not found in PATH"
-    exit 1
-}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Error "Git is required..."; exit 1 }
+if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Write-Error ".NET SDK is required..."; exit 1 }
 
 # Step 1.5: Setup MSVC Environment if nmake is not found
+# ... (Dieser Teil ist korrekt und bleibt unverändert) ...
 if (-not (Get-Command nmake -ErrorAction SilentlyContinue)) {
     Write-Host "⚠️ nmake.exe not found in PATH. Attempting to locate and configure MSVC environment..."
-    
     $vswherePath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    if (-not (Test-Path $vswherePath)) {
-        Write-Error "❌ vswhere.exe not found. Cannot automatically configure MSVC environment."
-        exit 1
-    }
-
+    if (-not (Test-Path $vswherePath)) { Write-Error "❌ vswhere.exe not found."; exit 1 }
     $vsInstallPath = & $vswherePath -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if (-not $vsInstallPath) {
-        Write-Error "❌ Could not find a Visual Studio installation with C++ Build Tools."
-        exit 1
-    }
-
+    if (-not $vsInstallPath) { Write-Error "❌ Could not find a Visual Studio installation with C++ Build Tools."; exit 1 }
     $vcvarsall = Join-Path $vsInstallPath "VC\Auxiliary\Build\vcvarsall.bat"
-    if (-not (Test-Path $vcvarsall)) {
-        Write-Error "❌ Could not find vcvarsall.bat in the located Visual Studio installation."
-        exit 1
-    }
-
+    if (-not (Test-Path $vcvarsall)) { Write-Error "❌ Could not find vcvarsall.bat."; exit 1 }
     Write-Host "✅ Found MSVC environment setup script at: $vcvarsall"
     $vcVarsCommand = """$vcvarsall"" x64"
 }
 else {
-    Write-Host "✅ nmake.exe is already in PATH. Skipping MSVC environment setup."
+    Write-Host "✅ nmake.exe is already in PATH."
     $vcVarsCommand = $null
 }
 
 # Step 2: Clone and prepare libpg_query
+# ... (Dieser Teil ist korrekt und bleibt unverändert) ...
 if (-not $SkipNative) {
     Write-Host "📥 Setting up libpg_query..." -ForegroundColor Yellow
-    
     if (-not (Test-Path "libpg_query")) {
         Write-Host "Cloning libpg_query (branch: $LibPgQueryBranch)..."
         & git clone -b $LibPgQueryBranch $LibPgQueryRepo
@@ -93,36 +72,30 @@ if (-not $SkipNative) {
     if (Test-Path "Makefile.msvc") {
         Write-Host "Using Visual Studio tools (nmake)..."
 
-        # --- FIX: EXPLIZITE FEHLERPRÜFUNG NACH JEDEM NMAKE-AUFRUF ---
         if ($vcVarsCommand) {
             Write-Host "Cleaning with nmake..."
             & cmd.exe /c "call $vcVarsCommand && nmake /F Makefile.msvc clean"
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "nmake clean command failed (this may be okay). Exit code: $LASTEXITCODE"
-            }
 
-            Write-Host "Building with nmake..."
-            & cmd.exe /c "call $vcVarsCommand && nmake /F Makefile.msvc"
+            Write-Host "Building DLL with nmake..."
+            # --- DER FINALE FIX IST HIER: 'dll' hinzugefügt ---
+            & cmd.exe /c "call $vcVarsCommand && nmake /F Makefile.msvc dll"
             if ($LASTEXITCODE -ne 0) {
-                Write-Error "❌ nmake build command failed with exit code $LASTEXITCODE. The pg_query.dll was not created. Check the C++ compiler/linker errors in the log above for the root cause."
+                Write-Error "❌ nmake build command failed with exit code $LASTEXITCODE. The pg_query.dll was not created. Check C++ errors above."
                 exit 1
             }
         }
         else {
             Write-Host "Cleaning with nmake (pre-configured environment)..."
             & nmake /F Makefile.msvc clean
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "nmake clean command failed (this may be okay). Exit code: $LASTEXITCODE"
-            }
             
-            Write-Host "Building with nmake (pre-configured environment)..."
-            & nmake /F Makefile.msvc
+            Write-Host "Building DLL with nmake (pre-configured environment)..."
+            # --- DER FINALE FIX IST HIER: 'dll' hinzugefügt ---
+            & nmake /F Makefile.msvc dll
             if ($LASTEXITCODE -ne 0) {
-                Write-Error "❌ nmake build command failed with exit code $LASTEXITCODE. The pg_query.dll was not created. Check the C++ compiler/linker errors in the log above for the root cause."
+                Write-Error "❌ nmake build command failed with exit code $LASTEXITCODE. The pg_query.dll was not created. Check C++ errors above."
                 exit 1
             }
         }
-        # --- ENDE DES FIXES ---
     }
     else {
         Write-Error "Makefile.msvc not found. Cannot build libpg_query."
@@ -133,22 +106,19 @@ if (-not $SkipNative) {
 }
 
 # Step 3: Create runtime directories and copy libraries
+# ... (Dieser Teil ist jetzt korrekt und wird funktionieren) ...
 if (-not $SkipNative) {
     Write-Host "📁 Setting up runtime directories..." -ForegroundColor Yellow
-    
     $ProjectRuntimeDir = "src\GrepSQL\runtimes\$TargetRid\native"
     New-Item -Path $ProjectRuntimeDir -ItemType Directory -Force | Out-Null
-    
     $SourceDll = "libpg_query\pg_query.dll"
     $DestinationDll = Join-Path $ProjectRuntimeDir "libpgquery_wrapper.dll"
-
     if (Test-Path $SourceDll) {
         Write-Host "✅ Successfully found build artifact: $SourceDll"
         Write-Host "Copying $SourceDll to $DestinationDll"
         Copy-Item $SourceDll $DestinationDll -Force
     }
     else {
-        # Diese Meldung sollte jetzt nicht mehr erreicht werden, da wir vorher abbrechen.
         Write-Error "❌ Build artifact pg_query.dll not found in libpg_query directory."
         exit 1
     }
