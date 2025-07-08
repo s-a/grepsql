@@ -120,18 +120,16 @@ namespace GrepSQL
         public bool ShowMatchInfo { get; set; } = false;
     }
 
+    // FIX: Die Options-Klasse wurde vereinfacht, um den Parser-Fehler zu beheben.
+    // Doppelte Properties für positionale und benannte Argumente wurden zusammengefasst.
     public class Options
     {
-        [Value(0, MetaName = "pattern", Required = false, HelpText = "SQL pattern expression to match against")]
-        public string? PositionalPattern { get; set; }
-
-        [Value(1, MetaName = "files", HelpText = "SQL files to search through")]
-        public IEnumerable<string> PositionalFiles { get; set; } = new List<string>();
-
-        [Option('p', "pattern", Required = false, HelpText = "SQL pattern expression to match against (alternative to positional)")]
+        [Value(0, MetaName = "pattern", HelpText = "SQL pattern expression to match against.")]
+        [Option('p', "pattern", HelpText = "SQL pattern expression to match against.")]
         public string? Pattern { get; set; }
 
-        [Option('f', "files", HelpText = "SQL files to search through (alternative to positional)")]
+        [Value(1, MetaName = "files", HelpText = "SQL files to search through.")]
+        [Option('f', "files", HelpText = "SQL files to search through.")]
         public IEnumerable<string> Files { get; set; } = new List<string>();
 
         [Option("from-sql", HelpText = "Inline SQL to search instead of files")]
@@ -237,14 +235,11 @@ namespace GrepSQL
         {
             try
             {
-                // Determine pattern (positional takes precedence)
-                var pattern = !string.IsNullOrEmpty(options.PositionalPattern) 
-                    ? options.PositionalPattern 
-                    : options.Pattern;
+                var pattern = options.Pattern;
 
                 if (string.IsNullOrEmpty(pattern))
                 {
-                    Console.Error.WriteLine("Error: Pattern is required. Provide it as first argument or use -p/--pattern option.");
+                    Console.Error.WriteLine("Error: Pattern is required. Provide it as the first argument or use -p/--pattern.");
                     return 1;
                 }
 
@@ -264,16 +259,7 @@ namespace GrepSQL
                     }
                 }
 
-                // Determine files (positional takes precedence, combine if both provided)
-                var allFiles = new List<string>();
-                if (options.PositionalFiles.Any())
-                {
-                    allFiles.AddRange(options.PositionalFiles);
-                }
-                if (options.Files.Any())
-                {
-                    allFiles.AddRange(options.Files);
-                }
+                var allFiles = options.Files;
 
                 // Expand glob patterns in file paths
                 var expandedFiles = ExpandGlobPatterns(allFiles);
@@ -343,11 +329,11 @@ namespace GrepSQL
         static List<string> ExpandGlobPatterns(IEnumerable<string> patterns)
         {
             var expandedFiles = new List<string>();
-            
+
             foreach (var pattern in patterns)
             {
                 if (string.IsNullOrEmpty(pattern)) continue;
-                
+
                 // Check if the pattern contains glob characters
                 if (pattern.Contains('*') || pattern.Contains('?'))
                 {
@@ -366,7 +352,7 @@ namespace GrepSQL
                             // Pattern with directory like dir/*.sql
                             var directory = Path.GetDirectoryName(pattern) ?? ".";
                             var searchPattern = Path.GetFileName(pattern);
-                            
+
                             if (Directory.Exists(directory))
                             {
                                 var files = Directory.GetFiles(directory, searchPattern, SearchOption.TopDirectoryOnly);
@@ -393,17 +379,17 @@ namespace GrepSQL
                     expandedFiles.Add(pattern);
                 }
             }
-            
+
             return expandedFiles.Distinct().ToList();
         }
 
         static void ProcessSql(string fileName, string content, string pattern, bool debug, bool verbose, List<SqlMatch> matches)
         {
             // No caching mechanism - expressions are compiled fresh each time
-            
+
             // Split content into individual SQL statements (basic approach)
             var sqlStatements = SplitSqlStatements(content);
-            
+
             for (int i = 0; i < sqlStatements.Count; i++)
             {
                 var sql = sqlStatements[i].Sql.Trim();
@@ -433,7 +419,7 @@ namespace GrepSQL
 
                     // Use PatternMatcher.Search which delegates to Postgres.SearchInSql
                     var results = PatternMatcher.Search(pattern, sql, debug);
-                    
+
                     if (debug && verbose)
                     {
                         Console.Error.WriteLine($"[DEBUG] SQL: {sql}");
@@ -443,7 +429,7 @@ namespace GrepSQL
 
                     // Get captures using the new capture system
                     var captures = PatternMatcher.SearchWithCaptures(pattern, sql, debug);
-                    
+
                     if (results.Count > 0 || captures.Any())
                     {
                         // Create a single match for this SQL statement with all matching nodes
@@ -513,7 +499,7 @@ namespace GrepSQL
                         i++;
                         continue;
                     }
-                    
+
                     // Skip SQL comments at statement start
                     if (ch == '-' && i + 1 < chars.Length && chars[i + 1] == '-')
                     {
@@ -524,7 +510,7 @@ namespace GrepSQL
                         }
                         continue;
                     }
-                    
+
                     // Set start line for this statement
                     startLine = currentLine;
                 }
@@ -572,14 +558,14 @@ namespace GrepSQL
                             currentStatement.Append(chars[i]);
                             if (chars[i] == '\n') currentLine++;
                         }
-                        
+
                         // Now find the closing tag
                         i++;
                         while (i < chars.Length)
                         {
                             currentStatement.Append(chars[i]);
                             if (chars[i] == '\n') currentLine++;
-                            
+
                             // Check if we found the closing tag
                             if (chars[i] == '$' && MatchesDollarTag(chars, i, dollarTag))
                             {
@@ -687,12 +673,12 @@ namespace GrepSQL
         static void PrintMatch(SqlMatch match, Options options)
         {
             var prefix = "";
-            
+
             if (!options.NoFilename && match.FileName != "(stdin)" && match.FileName != "(inline)")
             {
                 prefix += $"{match.FileName}:";
             }
-            
+
             if (options.ShowLineNumbers)
             {
                 prefix += $"{match.LineNumber}:";
@@ -706,12 +692,12 @@ namespace GrepSQL
                     for (int i = 0; i < match.Captures.Count; i++)
                     {
                         var capturedValue = match.Captures[i];
-                        
+
                         // If --tree is specified with --captures-only, show tree structure of captured nodes
                         if (options.PrintTree && capturedValue is IMessage capturedNode)
                         {
                             Console.WriteLine($"{prefix}[CAPTURED NODE {i}]");
-                            
+
                             var useColors = !options.NoColor && TreePrinter.SupportsColors();
                             var treeMode = ParseTreeMode(options.TreeMode);
                             TreePrinter.PrintTree(capturedNode, useColors, maxDepth: 8, TreePrinter.NodeStatus.Matched, treeMode);
@@ -720,7 +706,7 @@ namespace GrepSQL
                         {
                             // Default behavior: extract simple values or show object string representation
                             string? displayValue = null;
-                            
+
                             if (capturedValue is IMessage node)
                             {
                                 // Only call ExtractNodeValue if the node has a proper descriptor
@@ -742,7 +728,7 @@ namespace GrepSQL
                             {
                                 displayValue = capturedValue?.ToString();
                             }
-                            
+
                             if (!string.IsNullOrEmpty(displayValue))
                             {
                                 Console.WriteLine($"{prefix}{displayValue}");
@@ -759,7 +745,7 @@ namespace GrepSQL
                     // No captures found
                     Console.WriteLine($"{prefix}[NO CAPTURES]");
                 }
-                
+
                 if (!options.CountOnly)
                 {
                     Console.WriteLine(); // Empty line between matches
@@ -780,7 +766,7 @@ namespace GrepSQL
                 Console.WriteLine($"{prefix}[TREE]");
                 var useColors = !options.NoColor && TreePrinter.SupportsColors();
                 var treeMode = ParseTreeMode(options.TreeMode);
-                
+
                 // Print the tree for the parse tree root
                 if (match.Ast is IMessage astMessage)
                 {
@@ -794,7 +780,7 @@ namespace GrepSQL
             else if (options.PrintAst)
             {
                 Console.WriteLine($"{prefix}[AST]");
-                
+
                 if (match.Ast != null)
                 {
                     try
@@ -802,14 +788,14 @@ namespace GrepSQL
                         // Convert protobuf message to JSON
                         var jsonFormatter = new Google.Protobuf.JsonFormatter(Google.Protobuf.JsonFormatter.Settings.Default.WithFormatDefaultValues(true));
                         var json = jsonFormatter.Format((IMessage)match.Ast);
-                        
+
                         // Pretty print the JSON
                         var jsonDoc = JsonDocument.Parse(json);
-                        var prettyJson = JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions 
-                        { 
+                        var prettyJson = JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions
+                        {
                             WriteIndented = true
                         });
-                        
+
                         Console.WriteLine(prettyJson);
                     }
                     catch (Exception ex)
@@ -827,18 +813,18 @@ namespace GrepSQL
             {
                 // Handle highlighting if requested
                 var outputSql = match.Sql;
-                
+
                 if (options.HighlightMatches && match.MatchingNodes?.Any() == true)
                 {
                     var highlightOptions = CreateHighlightOptions(options);
-                    
+
                     if (options.ContextLines.HasValue)
                     {
                         outputSql = SqlHighlighter.HighlightSql(
-                            match.Sql, 
-                            match.MatchingNodes, 
+                            match.Sql,
+                            match.MatchingNodes,
                             highlightOptions);
-                        
+
                         // For context view, don't add prefix to each line since it's already formatted
                         Console.WriteLine($"{prefix}[CONTEXT]");
                         Console.WriteLine(outputSql);
@@ -859,7 +845,7 @@ namespace GrepSQL
                     Console.WriteLine($"{prefix}{outputSql}");
                 }
             }
-            
+
             if (!options.CountOnly)
             {
                 Console.WriteLine(); // Empty line between matches
@@ -871,7 +857,7 @@ namespace GrepSQL
             var highlightStyle = options.HighlightStyle?.ToLowerInvariant() switch
             {
                 "html" => "html",
-                "markdown" => "markdown", 
+                "markdown" => "markdown",
                 "ansi" => "ansi",
                 null => "ansi",
                 _ => "ansi"
@@ -892,47 +878,47 @@ namespace GrepSQL
         static string? ExtractNodeValue(IMessage node)
         {
             if (node == null) return null;
-            
+
             try
             {
                 if (node.Descriptor == null) return null;
-                
+
                 // Handle common node types that contain useful values
                 var nodeTypeName = node.Descriptor.Name;
 
-            switch (nodeTypeName)
-            {
-                case "A_Const":
-                    // Extract constant values (strings, numbers, etc.)
-                    return ExtractConstantValue(node);
-                    
-                case "RangeVar":
-                    // Extract table name from relname field
-                    return ExtractFieldValue(node, "relname");
-                    
-                case "ColumnRef":
-                    // Extract column name (might be in nested structure)
-                    return ExtractColumnName(node);
-                    
-                case "FuncCall":
-                    // Extract function name
-                    return ExtractFunctionName(node);
-                    
-                case "String":
-                    // Extract string value
-                    return ExtractFieldValue(node, "sval");
-                    
-                default:
-                    // For other node types, try to extract common field names
-                    var commonFields = new[] { "sval", "ival", "fval", "bval", "relname", "colname", "funcname", "name" };
-                    foreach (var fieldName in commonFields)
-                    {
-                        var value = ExtractFieldValue(node, fieldName);
-                        if (!string.IsNullOrEmpty(value))
-                            return value;
-                    }
-                    return null;
-            }
+                switch (nodeTypeName)
+                {
+                    case "A_Const":
+                        // Extract constant values (strings, numbers, etc.)
+                        return ExtractConstantValue(node);
+
+                    case "RangeVar":
+                        // Extract table name from relname field
+                        return ExtractFieldValue(node, "relname");
+
+                    case "ColumnRef":
+                        // Extract column name (might be in nested structure)
+                        return ExtractColumnName(node);
+
+                    case "FuncCall":
+                        // Extract function name
+                        return ExtractFunctionName(node);
+
+                    case "String":
+                        // Extract string value
+                        return ExtractFieldValue(node, "sval");
+
+                    default:
+                        // For other node types, try to extract common field names
+                        var commonFields = new[] { "sval", "ival", "fval", "bval", "relname", "colname", "funcname", "name" };
+                        foreach (var fieldName in commonFields)
+                        {
+                            var value = ExtractFieldValue(node, fieldName);
+                            if (!string.IsNullOrEmpty(value))
+                                return value;
+                        }
+                        return null;
+                }
             }
             catch (NotSupportedException)
             {
@@ -984,7 +970,7 @@ namespace GrepSQL
 
             var fieldsField = descriptor.Fields.InFieldNumberOrder()
                 .FirstOrDefault(f => f.Name == "fields");
-                
+
             if (fieldsField?.IsRepeated == true)
             {
                 var fieldsList = fieldsField.Accessor.GetValue(node) as System.Collections.IList;
@@ -1016,7 +1002,7 @@ namespace GrepSQL
 
             var funcnameField = descriptor.Fields.InFieldNumberOrder()
                 .FirstOrDefault(f => f.Name == "funcname");
-                
+
             if (funcnameField?.IsRepeated == true)
             {
                 var funcnameList = funcnameField.Accessor.GetValue(node) as System.Collections.IList;
