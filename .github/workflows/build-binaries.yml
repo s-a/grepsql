@@ -52,61 +52,55 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libc6-dev
-          # Workaround: ensure libdl is available for P/Invoke
-          sudo ln -sf /usr/lib/x86_64-linux-gnu/libdl.so.2 /usr/lib/libdl.so
-          echo "LD_LIBRARY_PATH=/usr/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Run comprehensive build script (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          echo "🏗️ Running comprehensive build script..."
+          echo '🏗️ Running comprehensive build script...'
           chmod +x scripts/build.sh
           ./scripts/build.sh
           
-          # Verify native library was created
-          echo "📋 Checking generated native libraries:"
-          find src/GrepSQL/runtimes/ -name "libpgquery_wrapper.*" -type f || echo "No native libraries found"
+          echo '📋 Checking generated native libraries:'
+          find src/GrepSQL/runtimes/ -name "libpgquery_wrapper.*" -type f
 
-      - name: Build for Windows (Placeholder)
+      # HINWEIS: Es wird keine setup-msvc-dev oder setup-msbuild Aktion mehr benötigt,
+      # da das build.ps1-Skript die Umgebung selbst einrichtet.
+      - name: Run comprehensive build script (Windows)
         if: runner.os == 'Windows'
-        shell: cmd
+        shell: powershell
         run: |
-          echo "🏗️ Building for Windows (partial support)..."
+          echo '🏗️ Running comprehensive Windows build script...'
+          ./scripts/build.ps1
           
-          REM Initialize submodules
-          git submodule update --init --recursive
-          
-          REM Create placeholder directory structure
-          mkdir "src\GrepSQL\runtimes\win-x64\native" 2>nul
-          
-          REM Create a minimal dummy DLL to satisfy the .NET runtime
-          echo. > "src\GrepSQL\runtimes\win-x64\native\libpgquery_wrapper.dll"
-          
-          REM Build .NET project only
-          dotnet restore
-          dotnet build --configuration Release --no-restore
-          echo "⚠️ Windows build completed with placeholder native library"
+          echo '📋 Checking generated native libraries:'
+          Get-ChildItem -Path "src\GrepSQL\runtimes\win-x64\native" -Filter "*.dll" -Recurse
 
+      # (Rest der YAML-Datei bleibt unverändert)
+      
       - name: Test (non-Windows)
         if: runner.os != 'Windows'
         run: dotnet test --configuration Release --no-build --verbosity normal
 
-      - name: Test (Windows - without native dependencies)
+      - name: Test (Windows)
         if: runner.os == 'Windows'
-        run: |
-          echo "Running limited tests on Windows..."
-          # dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=RequiresNative"
+        run: dotnet test --configuration Release --no-build --verbosity normal
 
       - name: Publish GrepSQL Binary
         run: dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj --configuration Release --runtime ${{ matrix.platform }} --self-contained true --output ./publish/${{ matrix.platform }} -p:PublishSingleFile=true -p:PublishTrimmed=true -p:IncludeNativeLibrariesForSelfExtract=true
 
-      - name: Test binary functionality
+      - name: Test binary functionality (Unix)
         if: runner.os != 'Windows'
         run: |
-          # Test the published binary
-          ./publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }} --help || echo "Binary needs runtime libraries"
-          echo "SELECT * FROM users;" | ./publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }} "SelectStmt" || echo "Test completed"
+          ./publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }} --help
+          echo "SELECT * FROM users;" | ./publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }} "SelectStmt"
+
+      - name: Test binary functionality (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          ./publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }} --help
+          echo "SELECT * FROM users;" | ./publish/${{ matrix.platform }}/GrepSQL.CLI${{ matrix.extension }} "SelectStmt"
 
       - name: Create archive (Unix)
         if: matrix.archive_ext == 'tar.gz'
@@ -152,11 +146,9 @@ jobs:
         run: |
           mkdir -p ./release-assets
           
-          # Copy all archives to release assets
           find ./artifacts -name "grepsql-*.tar.gz" -exec cp {} ./release-assets/ \;
           find ./artifacts -name "grepsql-*.zip" -exec cp {} ./release-assets/ \;
           
-          # List all assets
           echo "Release assets:"
           ls -la ./release-assets/
 
@@ -169,7 +161,6 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             echo "is_tag=true" >> $GITHUB_OUTPUT
           else
-            # Use commit short SHA for main branch builds
             VERSION="main-$(git rev-parse --short HEAD)"
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "tag=main-build" >> $GITHUB_OUTPUT
@@ -180,7 +171,6 @@ jobs:
         id: release_notes
         run: |
           if [[ "${{ steps.version.outputs.is_tag }}" == "true" ]]; then
-            # For tagged releases, get changes since last tag
             LAST_TAG=$(git describe --tags --abbrev=0 --exclude="${{ steps.version.outputs.tag }}" 2>/dev/null || echo "")
             if [ -z "$LAST_TAG" ]; then
               COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
@@ -192,13 +182,6 @@ jobs:
           ## 🚀 GrepSQL v${{ steps.version.outputs.version }}
           
           A powerful command-line tool for searching and filtering SQL files using PostgreSQL AST patterns.
-          
-          ### ✨ Features
-          - **Grep-style interface**: \`grepsql "pattern" files...\`
-          - **Built-in glob patterns**: Support for \`*.sql\`, \`**/*.sql\`
-          - **SQL highlighting**: ANSI colors, HTML, and Markdown output
-          - **Cross-platform**: Native binaries for Linux, macOS, and Windows
-          - **Self-contained**: No .NET runtime required
           
           ### 📦 Downloads
           Choose the appropriate binary for your platform:
@@ -213,28 +196,16 @@ jobs:
           tar -xzf grepsql-linux-x64.tar.gz
           
           # Make executable (Unix systems)
-          chmod +x GrepSQL
+          chmod +x GrepSQL.CLI
           
           # Search for SELECT statements
-          ./GrepSQL "SelectStmt" *.sql
-          
-          # Find specific table references
-          ./GrepSQL "(relname \"users\")" queries.sql --highlight
-          
-          # Count all statements recursively
-          ./GrepSQL "..." **/*.sql -c
+          ./GrepSQL.CLI "SelectStmt" *.sql
           \`\`\`
           
           ### 📋 Changes in this release
           $COMMITS
-          
-          ### 📚 Documentation
-          - [Full Documentation](https://github.com/jonatas/grepsql#readme)
-          - [Pattern Language Guide](https://github.com/jonatas/grepsql/blob/main/src/GrepSQL/README.md)
-          - [SQL Highlighting Examples](https://github.com/jonatas/grepsql/blob/main/src/GrepSQL/README.md#sql-highlighting-examples)
           EOF
           else
-            # For main branch builds
             RECENT_COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -10)
             
             cat > release_notes.md << EOF
@@ -273,4 +244,4 @@ jobs:
           echo "📦 Version: ${{ steps.version.outputs.version }}"
           echo "🏷️ Tag: ${{ steps.version.outputs.tag }}"
           echo "📁 Assets uploaded:"
-          ls -la ./release-assets/ 
+          ls -la ./release-assets/

@@ -1,4 +1,4 @@
-# GrepSQL Build Script for Windows
+﻿# GrepSQL Build Script for Windows
 # Requires: Visual Studio Build Tools, Git, .NET SDK, Protocol Buffers compiler
 
 param(
@@ -38,30 +38,42 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# Check for Visual Studio Build Tools
-$MSBuildPaths = @(
-    "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
-    "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
-    "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
-    "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
-)
-
-$MSBuild = $null
-foreach ($path in $MSBuildPaths) {
-    if (Test-Path $path) {
-        $MSBuild = $path
-        break
+# --- FIX: LOGIK ZUM AUTOMATISCHEN EINRICHTEN DER MSVC-UMGEBUNG ---
+# Step 1.5: Setup MSVC Environment if nmake is not found
+if (-not (Get-Command nmake -ErrorAction SilentlyContinue)) {
+    Write-Host "⚠️ nmake.exe not found in PATH. Attempting to locate and configure MSVC environment..."
+    
+    # Pfad zu vswhere.exe (auf GitHub Actions Runnern vorhanden)
+    $vswherePath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vswherePath)) {
+        Write-Error "❌ vswhere.exe not found. Cannot automatically configure MSVC environment."
+        exit 1
     }
-}
 
-if (-not $MSBuild) {
-    Write-Warning "⚠️  MSBuild not found. Native library compilation may fail."
-    Write-Host "Please install Visual Studio Build Tools 2019 or later"
+    # Finde den Installationspfad von Visual Studio mit C++ Build Tools
+    $vsInstallPath = & $vswherePath -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if (-not $vsInstallPath) {
+        Write-Error "❌ Could not find a Visual Studio installation with C++ Build Tools."
+        exit 1
+    }
+
+    # Pfad zum vcvarsall.bat-Skript, das die Umgebung einrichtet
+    $vcvarsall = Join-Path $vsInstallPath "VC\Auxiliary\Build\vcvarsall.bat"
+    if (-not (Test-Path $vcvarsall)) {
+        Write-Error "❌ Could not find vcvarsall.bat in the located Visual Studio installation."
+        exit 1
+    }
+
+    Write-Host "✅ Found MSVC environment setup script at: $vcvarsall"
+    # Wir werden dieses Skript später direkt vor dem nmake-Aufruf verwenden.
+    $vcVarsCommand = """$vcvarsall"" x64"
 }
+else {
+    Write-Host "✅ nmake.exe is already in PATH. Skipping MSVC environment setup."
+    $vcVarsCommand = $null
+}
+# --- ENDE DES FIXES ---
+
 
 # Step 2: Clone and prepare libpg_query
 if (-not $SkipNative) {
@@ -71,7 +83,8 @@ if (-not $SkipNative) {
         Write-Host "Cloning libpg_query (branch: $LibPgQueryBranch)..."
         & git clone -b $LibPgQueryBranch $LibPgQueryRepo
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } else {
+    }
+    else {
         Write-Host "libpg_query already exists, updating..."
         Set-Location libpg_query
         & git fetch origin
@@ -84,53 +97,51 @@ if (-not $SkipNative) {
     Write-Host "🔨 Building libpg_query for Windows..." -ForegroundColor Yellow
     Set-Location libpg_query
     
-    if ($MSBuild) {
-        # Try to build with Visual Studio
-        if (Test-Path "Makefile.msvc") {
-            Write-Host "Using Visual Studio tools..."
+    if (Test-Path "Makefile.msvc") {
+        Write-Host "Using Visual Studio tools (nmake)..."
+
+        # --- FIX: Führe nmake innerhalb der konfigurierten Umgebung aus ---
+        if ($vcVarsCommand) {
+            # Umgebung einrichten UND dann nmake ausführen
+            & cmd.exe /c "call $vcVarsCommand && nmake /F Makefile.msvc clean"
+            & cmd.exe /c "call $vcVarsCommand && nmake /F Makefile.msvc"
+        }
+        else {
+            # Umgebung war bereits eingerichtet, nmake direkt aufrufen
             & nmake /F Makefile.msvc clean
             & nmake /F Makefile.msvc
-        } else {
-            Write-Warning "Makefile.msvc not found, trying alternative approach..."
-            # Fallback: try to use make with WSL or similar
-            if (Get-Command make -ErrorAction SilentlyContinue) {
-                & make clean
-                & make
-            } else {
-                Write-Error "Cannot build libpg_query. Please install Visual Studio Build Tools or WSL."
-                exit 1
-            }
         }
+        # --- ENDE DES FIXES ---
+    }
+    else {
+        Write-Error "Makefile.msvc not found. Cannot build libpg_query."
+        exit 1
     }
     
     Set-Location $ProjectRoot
 }
 
+# (Rest des Skripts bleibt unverändert)
+
 # Step 3: Create runtime directories and copy libraries
 if (-not $SkipNative) {
     Write-Host "📁 Setting up runtime directories..." -ForegroundColor Yellow
     
-    $RuntimeDir = "runtimes\$TargetRid\native"
-    New-Item -Path $RuntimeDir -ItemType Directory -Force | Out-Null
-    
-    # Copy libraries (both .dll and .lib if they exist)
-    $LibraryFiles = @("libpg_query.dll", "libpg_query.lib", "libpgquery_wrapper.dll", "pg_query.dll")
-    
-    foreach ($lib in $LibraryFiles) {
-        if (Test-Path "libpg_query\$lib") {
-            Write-Host "Copying $lib to $RuntimeDir"
-            Copy-Item "libpg_query\$lib" $RuntimeDir -Force
-        }
-    }
-    
-    # Also copy to project runtimes directory
     $ProjectRuntimeDir = "src\GrepSQL\runtimes\$TargetRid\native"
     New-Item -Path $ProjectRuntimeDir -ItemType Directory -Force | Out-Null
     
-    foreach ($lib in $LibraryFiles) {
-        if (Test-Path "libpg_query\$lib") {
-            Copy-Item "libpg_query\$lib" $ProjectRuntimeDir -Force
-        }
+    # Define source and destination for the DLL
+    $SourceDll = "libpg_query\pg_query.dll"
+    $DestinationDll = Join-Path $ProjectRuntimeDir "libpgquery_wrapper.dll"
+
+    if (Test-Path $SourceDll) {
+        Write-Host "Copying $SourceDll to $DestinationDll"
+        # The .NET project expects the DLL to be named libpgquery_wrapper.dll
+        Copy-Item $SourceDll $DestinationDll -Force
+    }
+    else {
+        Write-Error "❌ Build artifact pg_query.dll not found in libpg_query directory."
+        exit 1
     }
 }
 
@@ -142,57 +153,48 @@ if (-not $SkipProtobuf) {
     $ProtocPath = Get-Command protoc -ErrorAction SilentlyContinue
     if (-not $ProtocPath) {
         Write-Warning "⚠️  protoc not found. Attempting to install via dotnet tool..."
-        & dotnet tool install --global protobuf-net.Protogen --version 3.2.26
+        try {
+            & dotnet tool install --global Grpc.Tools
+        }
+        catch {
+            Write-Error "❌ Failed to install Grpc.Tools. Please install the Protocol Buffers compiler (protoc) manually and add it to your PATH."
+            exit 1
+        }
         
-        # Try again
+        # Check again
         $ProtocPath = Get-Command protoc -ErrorAction SilentlyContinue
         if (-not $ProtocPath) {
-            Write-Error "❌ Could not find or install protoc. Please install Protocol Buffers compiler manually."
+            Write-Error "❌ Could not find protoc after installation. Please add the dotnet tools directory to your PATH (usually %USERPROFILE%\.dotnet\tools)."
             exit 1
         }
     }
     
-    # Add Grpc.Tools if not present
-    $GrpcToolsPath = "$env:USERPROFILE\.nuget\packages\grpc.tools"
-    if (-not (Test-Path $GrpcToolsPath)) {
-        Write-Host "Installing Grpc.Tools..."
-        & dotnet add "src\GrepSQL" package Grpc.Tools --version 2.72.0
-    }
-    
-    # Find the latest version and appropriate platform tools
-    $LatestVersion = Get-ChildItem $GrpcToolsPath | Sort-Object Name -Descending | Select-Object -First 1
-    $PluginPath = "$($LatestVersion.FullName)\tools\windows_x64"
-    
-    if (-not (Test-Path $PluginPath)) {
-        $PluginPath = "$($LatestVersion.FullName)\tools\windows_x86"
-    }
-    
-    $env:PATH = "$env:PATH;$PluginPath"
-    
-    # Generate protobuf files
+    # Define paths for protobuf generation
     $ProtoSrc = "libpg_query\protobuf"
     $ProtoOut = "src\GrepSQL\AST\Generated"
     
     New-Item -Path $ProtoOut -ItemType Directory -Force | Out-Null
     
-    # Clean previous files
+    # Clean previous generated files
     Get-ChildItem "$ProtoOut\*.cs" -ErrorAction SilentlyContinue | Remove-Item -Force
     
     Write-Host "Generating C# protobuf classes..."
-    & protoc --proto_path="$ProtoSrc" --csharp_out="$ProtoOut" --csharp_opt=file_extension=.g.cs "$ProtoSrc\pg_query.proto"
+    
+    # Execute the protoc command
+    & $ProtocPath --proto_path="$ProtoSrc" --csharp_out="$ProtoOut" --csharp_opt=file_extension=.g.cs "$ProtoSrc\pg_query.proto"
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "❌ Protobuf generation failed"
+        Write-Error "❌ Protobuf generation failed."
         exit $LASTEXITCODE
     }
     
-    # Verify generated files
+    # Verify that the main generated file exists
     if (-not (Test-Path "$ProtoOut\PgQuery.g.cs")) {
-        Write-Error "❌ Expected protobuf files not generated"
+        Write-Error "❌ Expected protobuf file PgQuery.g.cs was not generated."
         exit 1
     }
     
-    Write-Host "✅ Protobuf generation completed" -ForegroundColor Green
+    Write-Host "✅ Protobuf generation completed." -ForegroundColor Green
 }
 
 # Step 5: Build .NET project
@@ -204,45 +206,26 @@ if (-not $SkipBuild) {
     
     & dotnet build --configuration $Configuration --verbosity minimal
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "❌ Build failed"
+        Write-Error "❌ .NET Build failed"
         exit $LASTEXITCODE
     }
     
-    Write-Host "✅ Build completed successfully" -ForegroundColor Green
+    Write-Host "✅ .NET Build completed successfully." -ForegroundColor Green
     
     # Run tests if they exist
     if (Test-Path "tests\GrepSQL.Tests.csproj") {
         Write-Host "🧪 Running tests..." -ForegroundColor Yellow
         & dotnet test --configuration $Configuration --verbosity minimal
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "⚠️  Tests failed"
+            Write-Warning "⚠️  Tests failed."
         }
     }
     
-    # Create NuGet package
+    # Create NuGet package if the project is packable
     Write-Host "📦 Creating NuGet package..." -ForegroundColor Yellow
     New-Item -Path "artifacts" -ItemType Directory -Force | Out-Null
     & dotnet pack "src\GrepSQL" --configuration $Configuration --output "artifacts"
 }
 
 Write-Host ""
-Write-Host "🎉 Build completed successfully!" -ForegroundColor Green
-Write-Host ""
-Write-Host "📊 Build Summary:" -ForegroundColor Cyan
-Write-Host "  Target RID: $TargetRid"
-Write-Host "  Configuration: $Configuration"
-
-if (Test-Path "runtimes\$TargetRid\native") {
-    Write-Host "  Generated Libraries:"
-    Get-ChildItem "runtimes\$TargetRid\native" | ForEach-Object { Write-Host "    $($_.Name)" }
-}
-
-if (Test-Path "src\GrepSQL\AST\Generated") {
-    Write-Host "  Generated Protobuf Files:"
-    Get-ChildItem "src\GrepSQL\AST\Generated\*.cs" | ForEach-Object { Write-Host "    $($_.Name)" }
-}
-
-if (Test-Path "artifacts") {
-    Write-Host "  NuGet Packages:"
-    Get-ChildItem "artifacts\*.nupkg" | ForEach-Object { Write-Host "    $($_.Name)" }
-} 
+Write-Host "🎉 Build process finished!" -ForegroundColor Green
