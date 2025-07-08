@@ -38,26 +38,22 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# --- FIX: LOGIK ZUM AUTOMATISCHEN EINRICHTEN DER MSVC-UMGEBUNG ---
 # Step 1.5: Setup MSVC Environment if nmake is not found
 if (-not (Get-Command nmake -ErrorAction SilentlyContinue)) {
     Write-Host "⚠️ nmake.exe not found in PATH. Attempting to locate and configure MSVC environment..."
     
-    # Pfad zu vswhere.exe (auf GitHub Actions Runnern vorhanden)
     $vswherePath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswherePath)) {
         Write-Error "❌ vswhere.exe not found. Cannot automatically configure MSVC environment."
         exit 1
     }
 
-    # Finde den Installationspfad von Visual Studio mit C++ Build Tools
     $vsInstallPath = & $vswherePath -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     if (-not $vsInstallPath) {
         Write-Error "❌ Could not find a Visual Studio installation with C++ Build Tools."
         exit 1
     }
 
-    # Pfad zum vcvarsall.bat-Skript, das die Umgebung einrichtet
     $vcvarsall = Join-Path $vsInstallPath "VC\Auxiliary\Build\vcvarsall.bat"
     if (-not (Test-Path $vcvarsall)) {
         Write-Error "❌ Could not find vcvarsall.bat in the located Visual Studio installation."
@@ -65,15 +61,12 @@ if (-not (Get-Command nmake -ErrorAction SilentlyContinue)) {
     }
 
     Write-Host "✅ Found MSVC environment setup script at: $vcvarsall"
-    # Wir werden dieses Skript später direkt vor dem nmake-Aufruf verwenden.
     $vcVarsCommand = """$vcvarsall"" x64"
 }
 else {
     Write-Host "✅ nmake.exe is already in PATH. Skipping MSVC environment setup."
     $vcVarsCommand = $null
 }
-# --- ENDE DES FIXES ---
-
 
 # Step 2: Clone and prepare libpg_query
 if (-not $SkipNative) {
@@ -100,16 +93,34 @@ if (-not $SkipNative) {
     if (Test-Path "Makefile.msvc") {
         Write-Host "Using Visual Studio tools (nmake)..."
 
-        # --- FIX: Führe nmake innerhalb der konfigurierten Umgebung aus ---
+        # --- FIX: EXPLIZITE FEHLERPRÜFUNG NACH JEDEM NMAKE-AUFRUF ---
         if ($vcVarsCommand) {
-            # Umgebung einrichten UND dann nmake ausführen
+            Write-Host "Cleaning with nmake..."
             & cmd.exe /c "call $vcVarsCommand && nmake /F Makefile.msvc clean"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "nmake clean command failed (this may be okay). Exit code: $LASTEXITCODE"
+            }
+
+            Write-Host "Building with nmake..."
             & cmd.exe /c "call $vcVarsCommand && nmake /F Makefile.msvc"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "❌ nmake build command failed with exit code $LASTEXITCODE. The pg_query.dll was not created. Check the C++ compiler/linker errors in the log above for the root cause."
+                exit 1
+            }
         }
         else {
-            # Umgebung war bereits eingerichtet, nmake direkt aufrufen
+            Write-Host "Cleaning with nmake (pre-configured environment)..."
             & nmake /F Makefile.msvc clean
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "nmake clean command failed (this may be okay). Exit code: $LASTEXITCODE"
+            }
+            
+            Write-Host "Building with nmake (pre-configured environment)..."
             & nmake /F Makefile.msvc
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "❌ nmake build command failed with exit code $LASTEXITCODE. The pg_query.dll was not created. Check the C++ compiler/linker errors in the log above for the root cause."
+                exit 1
+            }
         }
         # --- ENDE DES FIXES ---
     }
@@ -121,8 +132,6 @@ if (-not $SkipNative) {
     Set-Location $ProjectRoot
 }
 
-# (Rest des Skripts bleibt unverändert)
-
 # Step 3: Create runtime directories and copy libraries
 if (-not $SkipNative) {
     Write-Host "📁 Setting up runtime directories..." -ForegroundColor Yellow
@@ -130,21 +139,23 @@ if (-not $SkipNative) {
     $ProjectRuntimeDir = "src\GrepSQL\runtimes\$TargetRid\native"
     New-Item -Path $ProjectRuntimeDir -ItemType Directory -Force | Out-Null
     
-    # Define source and destination for the DLL
     $SourceDll = "libpg_query\pg_query.dll"
     $DestinationDll = Join-Path $ProjectRuntimeDir "libpgquery_wrapper.dll"
 
     if (Test-Path $SourceDll) {
+        Write-Host "✅ Successfully found build artifact: $SourceDll"
         Write-Host "Copying $SourceDll to $DestinationDll"
-        # The .NET project expects the DLL to be named libpgquery_wrapper.dll
         Copy-Item $SourceDll $DestinationDll -Force
     }
     else {
+        # Diese Meldung sollte jetzt nicht mehr erreicht werden, da wir vorher abbrechen.
         Write-Error "❌ Build artifact pg_query.dll not found in libpg_query directory."
         exit 1
     }
 }
 
+# (Rest des Skripts bleibt unverändert)
+# ...
 # Step 4: Generate protobuf files
 if (-not $SkipProtobuf) {
     Write-Host "🔧 Generating protobuf files..." -ForegroundColor Yellow
