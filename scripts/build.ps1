@@ -103,7 +103,63 @@ if (-not $SkipNative) {
         }
     }
     
+
     Set-Location $ProjectRoot
+
+    # Step 2b: Build wrapper library
+    Write-Host "🔧 Building wrapper library..." -ForegroundColor Yellow
+
+    $WrapperPath = Join-Path $ProjectRoot "wrapper.c"
+    if (-not (Test-Path $WrapperPath)) {
+        Write-Host "Creating wrapper.c..."
+        @"
+#include \"libpg_query/pg_query.h\"
+
+PgQueryProtobufParseResult pg_query_parse_protobuf_wrapper(const char* input) {
+    return pg_query_parse_protobuf(input);
+}
+
+PgQueryProtobufParseResult pg_query_parse_protobuf_opts_wrapper(const char* input, int parser_options) {
+    return pg_query_parse_protobuf_opts(input, parser_options);
+}
+
+void pg_query_free_protobuf_parse_result_wrapper(PgQueryProtobufParseResult result) {
+    pg_query_free_protobuf_parse_result(result);
+}
+
+PgQueryDeparseResult pg_query_deparse_protobuf_wrapper(PgQueryProtobuf parse_tree) {
+    return pg_query_deparse_protobuf(parse_tree);
+}
+
+PgQueryParseResult pg_query_parse_wrapper(const char* input) {
+    return pg_query_parse(input);
+}
+
+void pg_query_free_parse_result_wrapper(PgQueryParseResult result) {
+    pg_query_free_parse_result(result);
+}
+
+PgQueryNormalizeResult pg_query_normalize_wrapper(const char* input) {
+    return pg_query_normalize(input);
+}
+
+void pg_query_free_normalize_result_wrapper(PgQueryNormalizeResult result) {
+    pg_query_free_normalize_result(result);
+}
+"@ | Set-Content $WrapperPath -Encoding ascii
+    }
+
+    $ClPath = Get-Command cl.exe -ErrorAction SilentlyContinue
+    if (-not $ClPath) {
+        Write-Error "cl.exe not found. Ensure Visual Studio Build Tools are installed and vcvars are loaded."
+        exit 1
+    }
+
+    & $ClPath /nologo /LD /I libpg_query $WrapperPath libpg_query\pg_query.lib /link /OUT:libpgquery_wrapper.dll
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "❌ Failed to compile wrapper library"
+        exit $LASTEXITCODE
+    }
 }
 
 # Step 3: Create runtime directories and copy libraries

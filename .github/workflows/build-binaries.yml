@@ -72,35 +72,20 @@ jobs:
           echo "📋 Checking generated native libraries:"
           find src/GrepSQL/runtimes/ -name "libpgquery_wrapper.*" -type f || echo "No native libraries found"
 
-      - name: Build for Windows (Placeholder)
+      - name: Build for Windows
         if: runner.os == 'Windows'
-        shell: cmd
+        shell: pwsh
         run: |
-          echo "🏗️ Building for Windows (partial support)..."
-          
-          REM Initialize submodules
           git submodule update --init --recursive
-          
-          REM Create placeholder directory structure
-          mkdir "src\GrepSQL\runtimes\win-x64\native" 2>nul
-          
-          REM Create a minimal dummy DLL to satisfy the .NET runtime
-          echo. > "src\GrepSQL\runtimes\win-x64\native\libpgquery_wrapper.dll"
-          
-          REM Build .NET project only
-          dotnet restore
-          dotnet build --configuration Release --no-restore
-          echo "⚠️ Windows build completed with placeholder native library"
+          ./scripts/build.ps1
 
       - name: Test (non-Windows)
         if: runner.os != 'Windows'
         run: dotnet test --configuration Release --no-build --verbosity normal
 
-      - name: Test (Windows - without native dependencies)
+      - name: Test (Windows)
         if: runner.os == 'Windows'
-        run: |
-          echo "Running limited tests on Windows..."
-          # dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=RequiresNative"
+        run: dotnet test --configuration Release --no-build --verbosity normal
 
       - name: Publish GrepSQL Binary
         run: dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj --configuration Release --runtime ${{ matrix.platform }} --self-contained true --output ./publish/${{ matrix.platform }} -p:PublishSingleFile=true -p:PublishTrimmed=true -p:IncludeNativeLibrariesForSelfExtract=true
