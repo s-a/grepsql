@@ -72,6 +72,14 @@ jobs:
           echo "📋 Checking generated native libraries:"
           find src/GrepSQL/runtimes/ -name "libpgquery_wrapper.*" -type f || echo "No native libraries found"
 
+      - name: Install protoc on Windows
+        if: runner.os == 'Windows'
+        run: choco install protoc -y
+
+      - name: Setup MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Build for Windows
         if: runner.os == 'Windows'
         shell: pwsh
@@ -83,9 +91,37 @@ jobs:
         if: runner.os != 'Windows'
         run: dotnet test --configuration Release --no-build --verbosity normal
 
+      - name: Restore test project (Windows)
+        if: runner.os == 'Windows'
+        run: dotnet restore "tests/GrepSQL.Tests/GrepSQL.Tests.csproj"
+
+      - name: Build test project (Windows)
+        if: runner.os == 'Windows'
+        run: dotnet build "tests/GrepSQL.Tests/GrepSQL.Tests.csproj" --configuration Release -p:Platform="Any CPU" --no-restore
+
+      - name: Copy native wrapper for tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item Env:Platform -ErrorAction SilentlyContinue
+
+          $testOut = "tests\GrepSQL.Tests\bin\Release\net9.0"
+          New-Item -ItemType Directory -Path $testOut -Force | Out-Null
+
+          Copy-Item `
+            -Path "src\GrepSQL\runtimes\win-x64\native\libpgquery_wrapper.dll" `
+            -Destination $testOut `
+            -Force
+
       - name: Test (Windows)
         if: runner.os == 'Windows'
-        run: dotnet test --configuration Release --no-build --verbosity normal
+        shell: pwsh
+        run: |
+          # Unset Platform so --no-build test finds the DLL
+          Remove-Item Env:Platform -ErrorAction SilentlyContinue
+          dotnet test "tests/GrepSQL.Tests/GrepSQL.Tests.csproj" `
+            --configuration Release `
+            --verbosity normal
 
       - name: Publish GrepSQL Binary
         run: dotnet publish src/GrepSQL.CLI/GrepSQL/GrepSQL.csproj --configuration Release --runtime ${{ matrix.platform }} --self-contained true --output ./publish/${{ matrix.platform }} -p:PublishSingleFile=true -p:PublishTrimmed=true -p:IncludeNativeLibrariesForSelfExtract=true
