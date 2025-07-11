@@ -74,18 +74,20 @@ if (-not $SkipNative) {
     $WrapperPath = Join-Path $ProjectRoot "wrapper.c"
     $DefPath = Join-Path $ProjectRoot "wrapper.def"
 
-    Write-Host "Creating wrapper.c with __stdcall calling convention..."
+    Write-Host "Creating wrapper.c with exported functions..." 
     @"
 #include "libpg_query/pg_query.h"
+#define EXPORT __declspec(dllexport)
 #define STDCALL __stdcall
 
-PgQueryProtobufParseResult STDCALL pg_query_parse_protobuf_wrapper(const char* input) { return pg_query_parse_protobuf(input); }
-void STDCALL pg_query_free_protobuf_parse_result_wrapper(PgQueryProtobufParseResult result) { pg_query_free_protobuf_parse_result(result); }
-PgQueryParseResult STDCALL pg_query_parse_wrapper(const char* input) { return pg_query_parse(input); }
-void STDCALL pg_query_free_parse_result_wrapper(PgQueryParseResult result) { pg_query_free_parse_result(result); }
-PgQueryNormalizeResult STDCALL pg_query_normalize_wrapper(const char* input) { return pg_query_normalize(input); }
-void STDCALL pg_query_free_normalize_result_wrapper(PgQueryNormalizeResult result) { pg_query_free_normalize_result(result); }
+EXPORT PgQueryProtobufParseResult STDCALL pg_query_parse_protobuf_wrapper(const char* input) { return pg_query_parse_protobuf(input); }
+EXPORT void STDCALL pg_query_free_protobuf_parse_result_wrapper(PgQueryProtobufParseResult result) { pg_query_free_protobuf_parse_result(result); }
+EXPORT PgQueryParseResult STDCALL pg_query_parse_wrapper(const char* input) { return pg_query_parse(input); }
+EXPORT void STDCALL pg_query_free_parse_result_wrapper(PgQueryParseResult result) { pg_query_free_parse_result(result); }
+EXPORT PgQueryNormalizeResult STDCALL pg_query_normalize_wrapper(const char* input) { return pg_query_normalize(input); }
+EXPORT void STDCALL pg_query_free_normalize_result_wrapper(PgQueryNormalizeResult result) { pg_query_free_normalize_result(result); }
 "@ | Set-Content -Path $WrapperPath -Encoding Ascii
+
 
     Write-Host "Creating wrapper.def to export functions..."
     @"
