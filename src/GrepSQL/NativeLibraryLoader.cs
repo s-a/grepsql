@@ -107,62 +107,8 @@ namespace GrepSQL
 
         private static IntPtr LoadLibrary(string path)
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                return LoadLibraryWindows(path);
-            }
-            else
-            {
-                // RTLD_NOW | RTLD_GLOBAL = 2 | 8 = 10
-                IntPtr handle;
-                string error = "Unknown error";
-                
-                try
-                {
-                    handle = dlopen(path, 10);
-                    if (handle != IntPtr.Zero)
-                        return handle;
-                    
-                    // Get error message
-                    var errorPtr = dlerror();
-                    error = errorPtr != IntPtr.Zero ? Marshal.PtrToStringUTF8(errorPtr) : "Unknown dlopen error";
-                }
-                catch (DllNotFoundException)
-                {
-                    // Fallback for different libdl naming on various Linux distributions
-                    try
-                    {
-                        handle = dlopenAlt(path, 10);
-                        if (handle != IntPtr.Zero)
-                            return handle;
-                        
-                        var errorPtr = dlerrorAlt();
-                        error = errorPtr != IntPtr.Zero ? Marshal.PtrToStringUTF8(errorPtr) : "Unknown dlopen error (alt)";
-                    }
-                    catch
-                    {
-                        error = "Both libdl loading methods failed";
-                    }
-                }
-                
-                throw new DllNotFoundException($"Failed to load library from {path}. Error: {error}");
-            }
+            // Use .NET's built-in loader for better cross-platform support
+            return NativeLibrary.Load(path);
         }
-
-        [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr LoadLibraryWindows(string lpFileName);
-
-        [DllImport("dl", CharSet = CharSet.Ansi)]
-        private static extern IntPtr dlopen(string filename, int flags);
-
-        [DllImport("dl")]
-        private static extern IntPtr dlerror();
-        
-        // Alternative imports for different Linux distributions
-        [DllImport("libdl.so.2", CharSet = CharSet.Ansi)]
-        private static extern IntPtr dlopenAlt(string filename, int flags);
-
-        [DllImport("libdl.so.2")]
-        private static extern IntPtr dlerrorAlt();
     }
 }
