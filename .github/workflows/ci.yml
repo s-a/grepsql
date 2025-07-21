@@ -51,7 +51,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libc6-dev
+          sudo apt-get install -y build-essential libc6-dev libc6 gcc-multilib
 
       - name: Run comprehensive build script
         shell: bash

@@ -107,7 +107,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     gcc -shared -fPIC -I. -o "libpgquery_wrapper.dylib" wrapper.c libpg_query/libpg_query.a
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo "Compiling wrapper for Linux..."
-    gcc -shared -fPIC -I. -o "libpgquery_wrapper.so" wrapper.c libpg_query/libpg_query.a
+    gcc -shared -fPIC -I. -o "libpgquery_wrapper.so" wrapper.c libpg_query/libpg_query.a -ldl
 fi
 
 # Step 3: Create runtime directories and copy libraries
