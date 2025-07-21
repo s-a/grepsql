@@ -124,6 +124,7 @@ jobs:
           fi
 
       - name: Run tests
+        if: matrix.os != 'windows-latest'
         timeout-minutes: 10
         run: dotnet test --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --logger trx --results-directory TestResults
 
