@@ -16,12 +16,6 @@ namespace GrepSQL
     // Simple TreePrinter implementation
     public static class TreePrinter
     {
-        public enum TreeMode
-        {
-            Clean,
-            Full
-        }
-
         public enum NodeStatus
         {
             Normal,
@@ -33,81 +27,148 @@ namespace GrepSQL
             return !Console.IsOutputRedirected;
         }
 
-        public static void PrintTree(IMessage node, bool useColors = true, int maxDepth = 8, NodeStatus status = NodeStatus.Normal, TreeMode mode = TreeMode.Clean, HashSet<IMessage>? matchingPath = null)
+        public static void PrintTree(IMessage node, bool useColors = true, NodeStatus status = NodeStatus.Normal, HashSet<IMessage>? matchingPath = null)
         {
-            PrintNode(node, 0, maxDepth, useColors, status, mode, matchingPath);
+            PrintNode(node, 0, useColors, status, matchingPath);
         }
 
-        private static void PrintNode(IMessage node, int depth, int maxDepth, bool useColors, NodeStatus status, TreeMode mode, HashSet<IMessage>? matchingPath)
+        private static void PrintNode(IMessage node, int depth, bool useColors, NodeStatus status, HashSet<IMessage>? matchingPath)
         {
-            if (depth > maxDepth || node == null) return;
+            if (node == null) return;
 
             var indent = new string(' ', depth * 2);
             var isMatched = matchingPath?.Contains(node) == true || status == NodeStatus.Matched;
             var nodeType = node.Descriptor?.Name ?? "Unknown";
 
+            // Start s-expression style output
             if (useColors && isMatched)
             {
-                Console.WriteLine($"{indent}\u001b[32m{nodeType}\u001b[0m"); // Green for matched
+                Console.Write($"{indent}(\u001b[32m{nodeType}\u001b[0m"); // Green for matched
             }
             else
             {
-                Console.WriteLine($"{indent}{nodeType}");
+                Console.Write($"{indent}({nodeType}");
             }
 
-            // Print fields based on mode
-            if (mode == TreeMode.Full || depth < 3)
+            // Print all non-null fields
+            var hasFields = false;
+            foreach (var field in node.Descriptor?.Fields.InFieldNumberOrder() ?? Enumerable.Empty<Google.Protobuf.Reflection.FieldDescriptor>())
             {
-                foreach (var field in node.Descriptor?.Fields.InFieldNumberOrder() ?? Enumerable.Empty<Google.Protobuf.Reflection.FieldDescriptor>())
+                var value = field.Accessor.GetValue(node);
+                if (value != null && !IsDefaultValue(value))
                 {
-                    var value = field.Accessor.GetValue(node);
-                    if (value != null)
-                    {
-                        PrintField(field.Name, value, depth + 1, maxDepth, useColors, mode, matchingPath);
-                    }
+                    hasFields = true;
+                    Console.WriteLine();
+                    PrintField(field.Name, value, depth + 1, useColors, matchingPath);
                 }
+            }
+
+            if (hasFields)
+            {
+                Console.WriteLine($"{indent})");
+            }
+            else
+            {
+                Console.WriteLine(")");
             }
         }
 
-        private static void PrintField(string fieldName, object value, int depth, int maxDepth, bool useColors, TreeMode mode, HashSet<IMessage>? matchingPath)
+        private static void PrintField(string fieldName, object value, int depth, bool useColors, HashSet<IMessage>? matchingPath)
         {
-            if (depth > maxDepth) return;
-
             var indent = new string(' ', depth * 2);
+            var properFieldName = ConvertToPascalCase(fieldName);
 
             if (value is IMessage message)
             {
-                Console.WriteLine($"{indent}{fieldName}:");
-                PrintNode(message, depth + 1, maxDepth, useColors, NodeStatus.Normal, mode, matchingPath);
+                Console.WriteLine($"{indent}({properFieldName}");
+                PrintNode(message, depth + 1, useColors, NodeStatus.Normal, matchingPath);
+                Console.WriteLine($"{indent})");
             }
             else if (value is System.Collections.IList list && list.Count > 0)
             {
-                Console.WriteLine($"{indent}{fieldName}: [{list.Count} items]");
-                for (int i = 0; i < Math.Min(list.Count, 5); i++)
+                Console.WriteLine($"{indent}({properFieldName}");
+                for (int i = 0; i < list.Count; i++)
                 {
-                    Console.WriteLine($"{indent}  [{i}]:");
-                    if (list[i] is IMessage listMessage)
+                    var listItem = list[i];
+                    if (listItem is IMessage listMessage)
                     {
-                        PrintNode(listMessage, depth + 2, maxDepth, useColors, NodeStatus.Normal, mode, matchingPath);
+                        PrintNode(listMessage, depth + 1, useColors, NodeStatus.Normal, matchingPath);
+                    }
+                    else if (listItem != null && !IsDefaultValue(listItem))
+                    {
+                        Console.WriteLine($"{new string(' ', (depth + 1) * 2)}{FormatValue(listItem)}");
+                    }
+                }
+                Console.WriteLine($"{indent})");
+            }
+            else if (value != null && !IsDefaultValue(value))
+            {
+                Console.WriteLine($"{indent}({properFieldName} {FormatValue(value)})");
+            }
+        }
+
+        private static string ConvertToPascalCase(string underscoreCase)
+        {
+            if (string.IsNullOrEmpty(underscoreCase))
+                return underscoreCase;
+
+            var parts = underscoreCase.Split('_');
+            var result = new StringBuilder();
+            
+            foreach (var part in parts)
+            {
+                if (!string.IsNullOrEmpty(part))
+                {
+                    // Handle special cases for AST node names
+                    if (part.ToLower() == "a")
+                    {
+                        result.Append("A_");
                     }
                     else
                     {
-                        Console.WriteLine($"{indent}    {list[i]}");
+                        result.Append(char.ToUpper(part[0]));
+                        if (part.Length > 1)
+                        {
+                            result.Append(part.Substring(1));
+                        }
                     }
                 }
-                if (list.Count > 5)
-                {
-                    Console.WriteLine($"{indent}  ... and {list.Count - 5} more");
-                }
             }
-            else if (value is string str && !string.IsNullOrEmpty(str))
+            
+            var pascalCase = result.ToString();
+            
+            // Handle special patterns that end with A_
+            if (pascalCase.EndsWith("A_"))
             {
-                Console.WriteLine($"{indent}{fieldName}: {str}");
+                pascalCase = pascalCase.Substring(0, pascalCase.Length - 1);
             }
-            else if (value is bool || value is int || value is long || value is double)
+            
+            return pascalCase;
+        }
+
+        private static bool IsDefaultValue(object value)
+        {
+            return value switch
             {
-                Console.WriteLine($"{indent}{fieldName}: {value}");
-            }
+                string str => string.IsNullOrEmpty(str),
+                bool b => !b,
+                int i => i == 0,
+                long l => l == 0,
+                double d => d == 0.0,
+                float f => f == 0.0f,
+                System.Collections.IList list => list.Count == 0,
+                _ => false
+            };
+        }
+
+        private static string FormatValue(object value)
+        {
+            return value switch
+            {
+                string str => $"\"{str}\"",
+                bool b => b.ToString().ToLower(),
+                _ => value.ToString() ?? "null"
+            };
         }
     }
 
@@ -148,9 +209,6 @@ namespace GrepSQL
 
         [Option("tree", HelpText = "Print AST as a formatted tree")]
         public bool PrintTree { get; set; }
-
-        [Option("tree-mode", HelpText = "Tree display mode: clean (default) or full")]
-        public string? TreeMode { get; set; }
 
         [Option("verbose", HelpText = "Enable verbose debug output")]
         public bool Verbose { get; set; }
@@ -427,7 +485,7 @@ namespace GrepSQL
                     {
                         Console.Error.WriteLine($"[DEBUG] ======== SQL: {sql} ========");
                         Console.Error.WriteLine($"[DEBUG] ======== AST Tree Structure ========");
-                        TreePrinter.PrintTree(parseResult.ParseTree, TreePrinter.SupportsColors(), 15, TreePrinter.NodeStatus.Normal, TreePrinter.TreeMode.Full);
+                        TreePrinter.PrintTree(parseResult.ParseTree, TreePrinter.SupportsColors(), TreePrinter.NodeStatus.Normal);
                         Console.Error.WriteLine($"[DEBUG] ======== Pattern Matching: {pattern} ========");
                     }
 
@@ -674,16 +732,6 @@ namespace GrepSQL
             return true;
         }
 
-        static TreePrinter.TreeMode ParseTreeMode(string? treeModeStr)
-        {
-            return treeModeStr?.ToLowerInvariant() switch
-            {
-                "full" => TreePrinter.TreeMode.Full,
-                "clean" or "" or null => TreePrinter.TreeMode.Clean,
-                _ => TreePrinter.TreeMode.Clean // Default to clean for invalid values
-            };
-        }
-
         static void PrintMatch(SqlMatch match, Options options)
         {
             var prefix = "";
@@ -713,8 +761,7 @@ namespace GrepSQL
                             Console.WriteLine($"{prefix}[CAPTURED NODE {i}]");
                             
                             var useColors = !options.NoColor && TreePrinter.SupportsColors();
-                            var treeMode = ParseTreeMode(options.TreeMode);
-                            TreePrinter.PrintTree(capturedNode, useColors, maxDepth: 8, TreePrinter.NodeStatus.Matched, treeMode);
+                            TreePrinter.PrintTree(capturedNode, useColors, TreePrinter.NodeStatus.Matched);
                         }
                         else
                         {
@@ -779,12 +826,11 @@ namespace GrepSQL
             {
                 Console.WriteLine($"{prefix}[TREE]");
                 var useColors = !options.NoColor && TreePrinter.SupportsColors();
-                var treeMode = ParseTreeMode(options.TreeMode);
                 
                 // Print the tree for the parse tree root
                 if (match.Ast is IMessage astMessage)
                 {
-                    TreePrinter.PrintTree(astMessage, useColors, maxDepth: 8, TreePrinter.NodeStatus.Normal, treeMode, match.MatchingPath);
+                    TreePrinter.PrintTree(astMessage, useColors, TreePrinter.NodeStatus.Normal, match.MatchingPath);
                 }
                 else
                 {
@@ -1056,3 +1102,4 @@ namespace GrepSQL
         }
     }
 }
+
