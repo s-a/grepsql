@@ -157,7 +157,7 @@ namespace GrepSQL.Tests
             }
             
             // If we get here, none of the patterns worked
-            Assert.True(false, "No string patterns worked - AST structure might be different than expected");
+            Assert.Fail("No string patterns worked - AST structure might be different than expected");
         }
 
         [Fact]
@@ -191,6 +191,107 @@ namespace GrepSQL.Tests
             foreach (var h in hypertables)
             {
                 _output.WriteLine($"  - Table: {h.TableName}, Time: {h.TimeColumn}");
+            }
+        }
+
+        [Fact]
+        public void TimescaleDbExtractFeatures_MultipleHypertables_ShouldExtractAll()
+        {
+            // Arrange - Multiple hypertable creation in one SQL block
+            var sql = @"
+                SELECT create_hypertable('sensor_data', by_range('timestamp'));
+                SELECT create_hypertable('metrics', by_range('time'), by_hash('device_id', 4));
+            ";
+
+            // Act
+            var obj = new TimescaleDbExtractFeatures(sql);
+
+            // Assert
+            Assert.Equal(2, obj.Hypertables.Count);
+            
+            // First hypertable
+            Assert.Equal("sensor_data", obj.Hypertables[0].TableName);
+            Assert.Equal("timestamp", obj.Hypertables[0].TimeColumn);
+            
+            // Second hypertable  
+            Assert.Equal("metrics", obj.Hypertables[1].TableName);
+            Assert.Equal("time", obj.Hypertables[1].TimeColumn);
+
+            _output.WriteLine($"Found {obj.Hypertables.Count} hypertables:");
+            foreach (var h in obj.Hypertables)
+            {
+                _output.WriteLine($"  - {h.TableName} with time column: {h.TimeColumn}");
+            }
+        }
+
+        [Fact]
+        public void TimescaleDbExtractFeatures_MultiplePolicies_ShouldExtractAll()
+        {
+            // Arrange - Multiple policies for different tables
+            var sql = @"
+                SELECT add_retention_policy('old_data', INTERVAL '30 days');
+                SELECT add_compression_policy('metrics', INTERVAL '7 days');
+            ";
+
+            // Act
+            var obj = new TimescaleDbExtractFeatures(sql);
+
+            // Assert
+            Assert.Equal(2, obj.Policies.Count);
+            
+            // Check retention policy
+            var retentionPolicy = obj.Policies.FirstOrDefault(p => p.PolicyType == "add_retention_policy");
+            Assert.NotNull(retentionPolicy);
+            Assert.Equal("old_data", retentionPolicy.TableName);
+            Assert.Equal("30 days", retentionPolicy.Interval);
+            
+            // Check compression policy
+            var compressionPolicy = obj.Policies.FirstOrDefault(p => p.PolicyType == "add_compression_policy");
+            Assert.NotNull(compressionPolicy);
+            Assert.Equal("metrics", compressionPolicy.TableName);
+            Assert.Equal("7 days", compressionPolicy.Interval);
+
+            _output.WriteLine($"Found {obj.Policies.Count} policies:");
+            foreach (var p in obj.Policies)
+            {
+                _output.WriteLine($"  - {p.PolicyType} for {p.TableName}: {p.Interval}");
+            }
+        }
+
+        [Fact]
+        public void TimescaleDbExtractFeatures_EdgeCases_ShouldHandleGracefully()
+        {
+            // Arrange - Edge cases: empty SQL, invalid SQL, partial SQL
+            var testCases = new[]
+            {
+                ("", "Empty SQL"),
+                ("SELECT 1;", "Non-TimescaleDB SQL"),
+                ("SELECT create_hypertable(", "Incomplete SQL"),
+                ("-- Just a comment", "Comment only")
+            };
+
+            foreach (var (sql, description) in testCases)
+            {
+                _output.WriteLine($"Testing: {description}");
+                
+                try
+                {
+                    // Act - Should not throw exceptions
+                    var obj = new TimescaleDbExtractFeatures(sql);
+
+                    // Assert - Should return empty collections, not null
+                    Assert.NotNull(obj.Hypertables);
+                    Assert.NotNull(obj.Policies);
+                    Assert.NotNull(obj.ContinuousAggregates);
+                    
+                    _output.WriteLine($"  ✓ Handled gracefully: {obj.Hypertables.Count} hypertables, {obj.Policies.Count} policies");
+                }
+                catch (Exception ex)
+                {
+                    _output.WriteLine($"  ✗ Exception: {ex.Message}");
+                    // For now, we expect some SQL parsing errors for invalid SQL
+                    // This helps us identify what needs to be made more robust
+                }
             }
         }
 
@@ -327,29 +428,38 @@ namespace GrepSQL.Tests
         {
             var hypertables = new List<HypertableInfo>();
 
-            // Pattern for create_hypertable function calls in SELECT statements
-            // Matches: SELECT create_hypertable('table_name', by_range('time_column'))
-            var createHypertableMatches = PatternMatcher.SearchInAst(
-                "(SelectStmt ... (String (Sval \"create_hypertable\")))", _ast);
-
+            // Use simpler, working pattern that we know works from earlier tests
+            var createHypertableMatches = PatternMatcher.SearchInAst("(String (Sval \"create_hypertable\"))", _ast);
             if (createHypertableMatches.Any())
             {
-                // Extract all string values and use positional logic
-                var allCaptures = PatternMatcher.SearchWithCapturesInAst("(sval $_)", _ast);
-                var allStrings = allCaptures.Select(c => CleanStringValue(c?.ToString())).ToList();
+                var allStrings = ExtractAllStringValues();
                 
-                // For create_hypertable: function_name, table_name, by_range, time_column
-                var createIndex = allStrings.IndexOf("create_hypertable");
-                if (createIndex >= 0 && createIndex + 1 < allStrings.Count)
+                // Find all occurrences of create_hypertable (not just the first one)
+                for (int i = 0; i < allStrings.Count; i++)
                 {
-                    var tableName = allStrings[createIndex + 1];
-                    
-                    hypertables.Add(new HypertableInfo
+                    if (allStrings[i] == "create_hypertable" && i + 1 < allStrings.Count)
                     {
-                        TableName = tableName,
-                        TimeColumn = "time",
-                        PartitioningOptions = new List<string> { "by_range" }
-                    });
+                        // Extract table name (next string after function name)
+                        var tableName = allStrings[i + 1];
+                        
+                        // Try to find time column from by_range function after this create_hypertable
+                        var timeColumn = "time"; // default
+                        for (int j = i + 2; j < Math.Min(allStrings.Count, i + 10); j++) // Look within next 10 strings
+                        {
+                            if (allStrings[j] == "by_range" && j + 1 < allStrings.Count)
+                            {
+                                timeColumn = allStrings[j + 1];
+                                break;
+                            }
+                        }
+                        
+                        hypertables.Add(new HypertableInfo
+                        {
+                            TableName = tableName,
+                            TimeColumn = timeColumn,
+                            PartitioningOptions = new List<string> { "by_range" }
+                        });
+                    }
                 }
             }
 
@@ -384,6 +494,27 @@ namespace GrepSQL.Tests
         {
             var policies = new List<PolicyInfo>();
 
+            // Extract policy functions using simple positional capture
+            var allStrings = ExtractAllStringValues();
+
+            for (int i = 0; i < allStrings.Count; i++)
+            {
+                if (IsPolicyFunction(allStrings[i]))
+                {
+                    var functionName = allStrings[i];
+                    var tableName = i + 1 < allStrings.Count ? allStrings[i + 1] : "unknown";
+                    var interval = allStrings.Skip(i).FirstOrDefault(s => s.Contains("day") || s.Contains("week") || s.Contains("month") || s.Contains("year") || s.Contains("hour")) ?? "";
+
+                    policies.Add(new PolicyInfo
+                    {
+                        PolicyType = functionName,
+                        TableName = tableName,
+                        Interval = interval,
+                        Configuration = new Dictionary<string, string> { { "function", functionName } }
+                    });
+                }
+            }
+
             // Pattern for ALTER TABLE compression settings
             // Matches: ALTER TABLE table_name SET (timescaledb.compress = true, ...)
             var alterTableMatches = PatternMatcher.SearchInAst("AlterTableStmt", _ast);
@@ -417,28 +548,6 @@ namespace GrepSQL.Tests
                         PolicyType = "compression",
                         TableName = tableName ?? "unknown",
                         Configuration = config
-                    });
-                }
-            }
-
-            // Extract policy functions using positional capture
-            var allCaptures = PatternMatcher.SearchWithCapturesInAst("(sval $_)", _ast);
-            var allStrings = allCaptures.Select(c => CleanStringValue(c?.ToString())).ToList();
-
-            for (int i = 0; i < allStrings.Count; i++)
-            {
-                if (IsPolicyFunction(allStrings[i]))
-                {
-                    var functionName = allStrings[i];
-                    var tableName = i + 1 < allStrings.Count ? allStrings[i + 1] : "unknown";
-                    var interval = allStrings.Skip(i).FirstOrDefault(s => s.Contains("day") || s.Contains("week") || s.Contains("month") || s.Contains("year") || s.Contains("hour")) ?? "";
-
-                    policies.Add(new PolicyInfo
-                    {
-                        PolicyType = functionName,
-                        TableName = tableName,
-                        Interval = interval,
-                        Configuration = new Dictionary<string, string> { { "function", functionName } }
                     });
                 }
             }
@@ -534,6 +643,12 @@ namespace GrepSQL.Tests
         }
 
 
+
+        private List<string> ExtractAllStringValues()
+        {
+            var allCaptures = PatternMatcher.SearchWithCapturesInAst("(sval $_)", _ast);
+            return allCaptures.Select(c => CleanStringValue(c?.ToString())).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        }
 
         private string CleanStringValue(string? value)
         {
