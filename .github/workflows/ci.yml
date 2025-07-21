@@ -53,32 +53,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libc6-dev libc6 gcc-multilib
 
-      - name: Run comprehensive build script
+      - name: Build native libraries (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          ./scripts/build.ps1 -Configuration Release -SkipProtobuf -SkipBuild
+          dotnet restore
+          dotnet build --configuration Release --no-restore
+
+      - name: Run comprehensive build script (non-Windows)
+        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
-          # Skip entire native build on Windows - needs different toolchain
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            echo "🏗️ Building for Windows (partial support)..."
-            echo "Skipping native library build on Windows - .NET code will be tested without native dependencies"
-            echo "Windows would need MSVC/Visual Studio build tools for native compilation"
-            
-            # Initialize submodules and build .NET only
-            git submodule update --init --recursive
-            dotnet restore
-            dotnet build --configuration Release --no-restore
-            exit 0
-          fi
-          
           echo "🏗️ Running comprehensive build script..."
           chmod +x scripts/build.sh
           ./scripts/build.sh
-          
+
           # Verify the build was successful
           echo "📋 Verifying build output:"
           find src/GrepSQL/runtimes/ -name "libpgquery_wrapper.*" -type f || echo "No native libraries found"
 
       - name: Debug - Show available files
-        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           echo "=== Main project output directory ==="
@@ -87,7 +82,7 @@ jobs:
           ls -la src/GrepSQL/ || echo "GrepSQL directory not found"
           find src/GrepSQL/runtimes/ -type f 2>/dev/null || echo "No runtimes directory"
 
-      - name: Copy native libraries to test project
+      - name: Copy native libraries to test project (Linux/macOS)
         if: matrix.os != 'windows-latest'
         shell: bash
         run: |
@@ -103,28 +98,38 @@ jobs:
             fi
             LIBRARY_EXT="dylib"
           fi
-          
-          # Copy native libraries to test project output
+
           TEST_OUTPUT_DIR="tests/GrepSQL.Tests/bin/Release/net9.0"
           mkdir -p "$TEST_OUTPUT_DIR/runtimes/$TARGET_RID/native"
-          
+
           if [ -f "src/GrepSQL/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" ]; then
-            mkdir -p "$TEST_OUTPUT_DIR/runtimes/$TARGET_RID/native"
             cp "src/GrepSQL/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" "$TEST_OUTPUT_DIR/runtimes/$TARGET_RID/native/"
-            echo "Copied library to test runtimes directory"
-            # Also copy to test output directory root for fallback
             cp "src/GrepSQL/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT" "$TEST_OUTPUT_DIR/"
-            echo "Copied library to test output root"
-            echo "Test directory contents:"
+            echo "Copied library to test output"
             ls -la "$TEST_OUTPUT_DIR/"
           else
             echo "Warning: Native library not found at src/GrepSQL/runtimes/$TARGET_RID/native/libpgquery_wrapper.$LIBRARY_EXT"
-            echo "Available files in src/GrepSQL/runtimes/:"
             find src/GrepSQL/runtimes/ -name "*.so" -o -name "*.dylib" || echo "No native libraries found"
           fi
 
+      - name: Copy native libraries to test project (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $targetRid = 'win-x64'
+          $library = "src/GrepSQL/runtimes/$targetRid/native/libpgquery_wrapper.dll"
+          $testDir = "tests/GrepSQL.Tests/bin/Release/net9.0"
+          New-Item -ItemType Directory -Path "$testDir/runtimes/$targetRid/native" -Force | Out-Null
+          if (Test-Path $library) {
+            Copy-Item $library "$testDir/runtimes/$targetRid/native/" -Force
+            Copy-Item $library "$testDir/" -Force
+            Get-ChildItem $testDir
+          } else {
+            Write-Host "Native library not found at $library"
+            Get-ChildItem -Recurse src/GrepSQL/runtimes
+          }
+
       - name: Run tests
-        if: matrix.os != 'windows-latest'
         timeout-minutes: 10
         run: dotnet test --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --logger trx --results-directory TestResults
 
@@ -136,7 +141,6 @@ jobs:
           fail_ci_if_error: false
 
       - name: Test GrepSQL CLI
-        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           # Test basic functionality
